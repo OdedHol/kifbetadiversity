@@ -155,16 +155,18 @@
 
 #' Reshape raw long-format survey records into a site x species matrix
 #'
+#' `r lifecycle::badge("experimental")`
+#'
 #' Takes one-row-per-observation field data (a site ID, a species ID, and
 #' optionally a detection value and/or a category label) and reshapes it into
 #' the sites (rows) x species (columns) matrix expected by
 #' \code{\link{beta_diversity}}, along with an aligned per-site group vector
 #' when a category column is supplied.
 #'
-#' @param data A long-format data.frame, one row per observation.
-#' @param site Column name (single string) in \code{data} identifying the
+#' @param x A long-format data.frame, one row per observation.
+#' @param site Column name (single string) in \code{x} identifying the
 #'   site of each record. Required. Rows with \code{NA} site error.
-#' @param species Column name (single string) in \code{data} identifying the
+#' @param species Column name (single string) in \code{x} identifying the
 #'   species of each record. Required. Rows with \code{NA} species error.
 #' @param value Optional column name (single string) giving the detection
 #'   value for each record: logical, numeric (counts or weights, thresholded
@@ -173,7 +175,7 @@
 #'   TRUE/FALSE/Y/N/yes/no/present/absent, or as a plain number if not one of
 #'   those tokens). \code{NA} values are treated as absence, with a warning.
 #'   Unparseable non-NA values error, naming the offending value(s). Defaults
-#'   to \code{NULL}, meaning every row in \code{data} is itself a detection
+#'   to \code{NULL}, meaning every row in \code{x} is itself a detection
 #'   (presence-only records).
 #' @param group Optional column name (single string) giving a per-site
 #'   category/habitat label (e.g. "under tree" vs "open field"), passed
@@ -185,7 +187,7 @@
 #'   no way to represent "surveyed but nothing seen," those sites are added
 #'   as all-zero rows. If omitted, a warning explains that zero-detection
 #'   sites (if any) will be silently missing, deflating N and biasing
-#'   beta-diversity estimates. A site present in \code{data} but missing from
+#'   beta-diversity estimates. A site present in \code{x} but missing from
 #'   \code{all_sites} errors, naming the site. Defaults to \code{NULL}.
 #'
 #' @details
@@ -215,10 +217,11 @@
 #' res$group
 #' beta_diversity(res$x, group = res$group)
 #'
+#' @family beta diversity functions
 #' @export
-as_site_by_species <- function(data, site, species, value = NULL,
+as_site_by_species <- function(x, site, species, value = NULL,
                                 group = NULL, all_sites = NULL) {
-  if (!is.data.frame(data) || nrow(data) == 0) {
+  if (!is.data.frame(x) || nrow(x) == 0) {
     stop("Your data table is empty (0 rows) -- as_site_by_species() needs ",
          "at least one record to reshape")
   }
@@ -229,14 +232,14 @@ as_site_by_species <- function(data, site, species, value = NULL,
   .check_col_arg(group, "group")
 
   needed <- c(site, species, value, group)
-  missing_cols <- setdiff(needed, names(data))
+  missing_cols <- setdiff(needed, names(x))
   if (length(missing_cols) > 0) {
-    stop("Column(s) not found in `data`: ", paste(missing_cols, collapse = ", "),
-         ". Available columns: ", paste(names(data), collapse = ", "))
+    stop("Column(s) not found in `x`: ", paste(missing_cols, collapse = ", "),
+         ". Available columns: ", paste(names(x), collapse = ", "))
   }
 
-  site_ids <- data[[site]]
-  species_ids <- data[[species]]
+  site_ids <- x[[site]]
+  species_ids <- x[[species]]
 
   if (anyNA(site_ids)) {
     stop(sum(is.na(site_ids)), " row(s) are missing a site name in the '",
@@ -254,7 +257,7 @@ as_site_by_species <- function(data, site, species, value = NULL,
   .warn_case_collisions(site_ids, "site")
   .warn_case_collisions(species_ids, "species")
 
-  presence <- .resolve_presence(data, value)
+  presence <- .resolve_presence(x, value)
 
   n_dup <- sum(duplicated(data.frame(site_ids, species_ids)))
   if (n_dup > 0) {
@@ -276,7 +279,7 @@ as_site_by_species <- function(data, site, species, value = NULL,
 
   mat <- .apply_all_sites(mat, all_sites)
 
-  group_vec <- .resolve_group(data, group, site_ids, rownames(mat))
+  group_vec <- .resolve_group(x, group, site_ids, rownames(mat))
 
   list(x = mat, group = group_vec)
 }

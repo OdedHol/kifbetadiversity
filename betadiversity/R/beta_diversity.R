@@ -106,6 +106,8 @@
 
 #' Beta diversity point estimates and confidence intervals (Kiflawi & Spencer 2004)
 #'
+#' `r lifecycle::badge("experimental")`
+#'
 #' Computes Whittaker's multiplicative beta diversity (beta_M = gamma/alpha - 1)
 #' and Lande's additive beta diversity (beta_A = gamma - alpha) from a
 #' sites x species presence/absence matrix, along with analytical 95%
@@ -161,6 +163,7 @@
 #' treatment <- rep(c("control", "npk"), each = 10)
 #' beta_diversity(x2, group = treatment)
 #'
+#' @family beta diversity functions
 #' @export
 beta_diversity <- function(x, group = NULL, conf = 0.95) {
   if (!is.numeric(conf) || length(conf) != 1 || is.na(conf)) {
@@ -225,6 +228,8 @@ beta_diversity <- function(x, group = NULL, conf = 0.95) {
 
 #' Two-sample hypothesis test for beta diversity (Kiflawi & Spencer 2004)
 #'
+#' `r lifecycle::badge("experimental")`
+#'
 #' Tests whether two independent site-sets differ in beta diversity, for both
 #' the multiplicative (beta_M) and additive (beta_A) measures, following
 #' Eqs. 10a-10b of Kiflawi & Spencer (2004).
@@ -243,6 +248,7 @@ beta_diversity <- function(x, group = NULL, conf = 0.95) {
 #' y <- matrix(rbinom(8 * 10, 1, 0.35), nrow = 8)
 #' beta_diversity_test(x, y)
 #'
+#' @family beta diversity functions
 #' @export
 beta_diversity_test <- function(x, y, conf = 0.95) {
   s1 <- beta_diversity(x, conf = conf)

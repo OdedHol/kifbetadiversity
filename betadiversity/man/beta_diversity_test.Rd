@@ -18,6 +18,9 @@ A one-row data.frame with columns \code{Z_beta_M}, \code{p_beta_M},
 \code{Z_beta_A}, \code{p_beta_A} (two-tailed p-values).
 }
 \description{
+\ifelse{html}{\href{https://lifecycle.r-lib.org/articles/stages.html#experimental}{\figure{lifecycle-experimental.svg}{options: alt='[Experimental]'}}}{\strong{[Experimental]}}
+}
+\details{
 Tests whether two independent site-sets differ in beta diversity, for both
 the multiplicative (beta_M) and additive (beta_A) measures, following
 Eqs. 10a-10b of Kiflawi & Spencer (2004).
@@ -29,3 +32,9 @@ y <- matrix(rbinom(8 * 10, 1, 0.35), nrow = 8)
 beta_diversity_test(x, y)
 
 }
+\seealso{
+Other beta diversity functions: 
+\code{\link{as_site_by_species}()},
+\code{\link{beta_diversity}()}
+}
+\concept{beta diversity functions}

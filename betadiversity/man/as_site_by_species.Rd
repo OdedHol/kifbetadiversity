@@ -5,7 +5,7 @@
 \title{Reshape raw long-format survey records into a site x species matrix}
 \usage{
 as_site_by_species(
-  data,
+  x,
   site,
   species,
   value = NULL,
@@ -14,12 +14,12 @@ as_site_by_species(
 )
 }
 \arguments{
-\item{data}{A long-format data.frame, one row per observation.}
+\item{x}{A long-format data.frame, one row per observation.}
 
-\item{site}{Column name (single string) in \code{data} identifying the
+\item{site}{Column name (single string) in \code{x} identifying the
 site of each record. Required. Rows with \code{NA} site error.}
 
-\item{species}{Column name (single string) in \code{data} identifying the
+\item{species}{Column name (single string) in \code{x} identifying the
 species of each record. Required. Rows with \code{NA} species error.}
 
 \item{value}{Optional column name (single string) giving the detection
@@ -29,7 +29,7 @@ character/factor (parsed case-insensitively as
 TRUE/FALSE/Y/N/yes/no/present/absent, or as a plain number if not one of
 those tokens). \code{NA} values are treated as absence, with a warning.
 Unparseable non-NA values error, naming the offending value(s). Defaults
-to \code{NULL}, meaning every row in \code{data} is itself a detection
+to \code{NULL}, meaning every row in \code{x} is itself a detection
 (presence-only records).}
 
 \item{group}{Optional column name (single string) giving a per-site
@@ -43,7 +43,7 @@ including sites with zero detections. Since presence-only field data has
 no way to represent "surveyed but nothing seen," those sites are added
 as all-zero rows. If omitted, a warning explains that zero-detection
 sites (if any) will be silently missing, deflating N and biasing
-beta-diversity estimates. A site present in \code{data} but missing from
+beta-diversity estimates. A site present in \code{x} but missing from
 \code{all_sites} errors, naming the site. Defaults to \code{NULL}.}
 }
 \value{
@@ -53,13 +53,15 @@ per-site category vector aligned to \code{rownames(x)} (or \code{NULL}
 if \code{group} was not supplied).
 }
 \description{
+\ifelse{html}{\href{https://lifecycle.r-lib.org/articles/stages.html#experimental}{\figure{lifecycle-experimental.svg}{options: alt='[Experimental]'}}}{\strong{[Experimental]}}
+}
+\details{
 Takes one-row-per-observation field data (a site ID, a species ID, and
 optionally a detection value and/or a category label) and reshapes it into
 the sites (rows) x species (columns) matrix expected by
 \code{\link{beta_diversity}}, along with an aligned per-site group vector
 when a category column is supplied.
-}
-\details{
+
 Site and species IDs are automatically trimmed of leading/trailing
 whitespace. Names differing only by case (e.g. "SiteA" vs "sitea") are
 kept as distinct sites/species, with a warning. Duplicate (site, species)
@@ -82,3 +84,9 @@ res$group
 beta_diversity(res$x, group = res$group)
 
 }
+\seealso{
+Other beta diversity functions: 
+\code{\link{beta_diversity}()},
+\code{\link{beta_diversity_test}()}
+}
+\concept{beta diversity functions}

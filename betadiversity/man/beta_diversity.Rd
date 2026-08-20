@@ -39,14 +39,16 @@ A data.frame with one row per group (one row total if
 \code{beta_A}, \code{se_beta_A}, \code{beta_A_lwr}, \code{beta_A_upr}.
 }
 \description{
+\ifelse{html}{\href{https://lifecycle.r-lib.org/articles/stages.html#experimental}{\figure{lifecycle-experimental.svg}{options: alt='[Experimental]'}}}{\strong{[Experimental]}}
+}
+\details{
 Computes Whittaker's multiplicative beta diversity (beta_M = gamma/alpha - 1)
 and Lande's additive beta diversity (beta_A = gamma - alpha) from a
 sites x species presence/absence matrix, along with analytical 95\%
 confidence intervals, following Kiflawi & Spencer (2004, Ecology 85:2895-2900).
 If \code{group} is supplied, sites are split by group and every quantity
 is computed separately per group.
-}
-\details{
+
 The true regional richness (gamma) is not observed directly; it is estimated
 via the first-order jackknife richness estimator (Heltshe & Forrester 1983),
 computed directly following Kiflawi & Spencer (2004) Eqs. 6a-6b. The point
@@ -68,3 +70,9 @@ treatment <- rep(c("control", "npk"), each = 10)
 beta_diversity(x2, group = treatment)
 
 }
+\seealso{
+Other beta diversity functions: 
+\code{\link{as_site_by_species}()},
+\code{\link{beta_diversity_test}()}
+}
+\concept{beta diversity functions}
