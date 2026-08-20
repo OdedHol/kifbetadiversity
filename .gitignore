@@ -2,3 +2,4 @@
 .Rproj.user/
 *.Rcheck/
 betadiversity.Rcheck/
+.Rhistory
