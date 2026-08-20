@@ -1,0 +1,19 @@
+Package: betadiversity
+Title: Confidence Intervals and Hypothesis Tests for Beta Diversity
+Version: 0.0.0.9000
+Authors@R:
+    person("Oded", "Hollander", , "odedhollander23@gmail.com", role = c("aut", "cre"))
+Description: Computes Whittaker's multiplicative and Lande's additive beta
+    diversity from site-by-species presence/absence data, with analytical
+    confidence intervals and a two-sample hypothesis test, following
+    Kiflawi & Spencer (2004, Ecology 85(10):2895-2900).
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+License: MIT + file LICENSE
+Imports:
+    tidyr
+Suggests:
+    testthat (>= 3.0.0),
+    vegan
+Config/testthat/edition: 3
