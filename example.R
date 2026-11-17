@@ -1,7 +1,7 @@
 # Example usage of beta_diversity() and beta_diversity_test()
 # (Kiflawi & Spencer 2004 beta diversity, Ecology 85:2895-2900)
 
-devtools::load_all("betadiversity")
+devtools::load_all(".")
 
 ## ---- Toy site/species presence-absence pivot table ----
 # 7 sites x 9 species. Species sp8 and sp9 are "uniques" (found at only one

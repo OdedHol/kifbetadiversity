@@ -1,5 +1,6 @@
 .DS_Store
 .Rproj.user/
-*.Rcheck/
-betadiversity.Rcheck/
 .Rhistory
+*.Rcheck/
+inst/doc
+docs/
