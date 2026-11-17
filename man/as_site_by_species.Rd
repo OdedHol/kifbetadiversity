@@ -14,74 +14,87 @@ as_site_by_species(
 )
 }
 \arguments{
-\item{x}{A long-format data.frame, one row per observation.}
+\item{x}{A long-format data.frame, one row per record (e.g. as read with
+\code{read.csv()}).}
 
-\item{site}{Column name (single string) in \code{x} identifying the
-site of each record. Required. Rows with \code{NA} site error.}
+\item{site}{Name of the column in \code{x} saying where each record is
+from (e.g. \code{"trap"}). Required. Rows with a blank or missing site
+are an error, naming the rows.}
 
-\item{species}{Column name (single string) in \code{x} identifying the
-species of each record. Required. Rows with \code{NA} species error.}
+\item{species}{Name of the column in \code{x} saying which species each
+record is (e.g. \code{"species"}, or a morphospecies code). Required.
+Rows with a blank or missing species are an error, naming the rows,
+since the package can't tell which species they were: fix or remove
+them first.}
 
-\item{value}{Optional column name (single string) giving the detection
-value for each record: logical, numeric (counts or weights, thresholded
-at > 0, matching \code{\link{beta_diversity}}'s own convention), or
-character/factor (parsed case-insensitively as
-TRUE/FALSE/Y/N/yes/no/present/absent, or as a plain number if not one of
-those tokens). \code{NA} values are treated as absence, with a warning.
-Unparseable non-NA values error, naming the offending value(s). Defaults
-to \code{NULL}, meaning every row in \code{x} is itself a detection
+\item{value}{Optional name of a column saying whether the species was
+found: logical, numeric (counts or weights; above 0 means present), or
+text (case-insensitive TRUE/FALSE, T/F, Y/N, yes/no, present/absent,
+P/A, or a number written as text). Blank or missing cells count as
+absence, with a warning. Other values are an error naming them.
+Defaults to \code{NULL}, meaning every row is a detection
 (presence-only records).}
 
-\item{group}{Optional column name (single string) giving a per-site
-category/habitat label (e.g. "under tree" vs "open field"), passed
-through as the \code{group} vector for \code{\link{beta_diversity}}. A
-site with inconsistent labels across its rows errors, naming the site
-and the conflicting values. Defaults to \code{NULL}.}
+\item{group}{Optional name of a column giving each site's habitat or
+treatment (e.g. \code{"habitat"}), returned as the \code{group} vector
+for \code{\link{beta_diversity}}. A site with two different labels
+across its rows is an error, naming the site and the labels. Blank
+labels count as missing. Defaults to \code{NULL}.}
 
-\item{all_sites}{Optional character vector of every surveyed site ID,
-including sites with zero detections. Since presence-only field data has
-no way to represent "surveyed but nothing seen," those sites are added
-as all-zero rows. If omitted, a warning explains that zero-detection
-sites (if any) will be silently missing, deflating N and biasing
-beta-diversity estimates. A site present in \code{x} but missing from
-\code{all_sites} errors, naming the site. Defaults to \code{NULL}.}
+\item{all_sites}{Every site you surveyed, including sites where nothing
+was found. Presence-only records can't show "surveyed, but nothing
+found", so without this those sites are missing, which makes beta
+diversity look too low. Either a vector of site names, or (when you use
+\code{group}) a data frame with a column named like your \code{site}
+column and one named like your \code{group} column, so that empty sites
+also get their habitat. Extra columns are ignored. A site in \code{x}
+but missing from \code{all_sites} is an error. If omitted, a warning
+explains the risk. Defaults to \code{NULL}.}
 }
 \value{
-A list with two elements: \code{x}, the sites x species matrix
-ready to pass as \code{beta_diversity(x = ...)}; and \code{group}, the
-per-site category vector aligned to \code{rownames(x)} (or \code{NULL}
-if \code{group} was not supplied).
+A list with two elements: \code{x}, the sites x species 0/1
+matrix ready to pass as \code{beta_diversity(x = ...)}; and
+\code{group}, the per-site group vector aligned to \code{rownames(x)}
+(\code{NULL} if \code{group} was not supplied; \code{NA} for a site
+with no label).
 }
 \description{
 \ifelse{html}{\href{https://lifecycle.r-lib.org/articles/stages.html#experimental}{\figure{lifecycle-experimental.svg}{options: alt='[Experimental]'}}}{\strong{[Experimental]}}
 }
 \details{
-Takes one-row-per-observation field data (a site ID, a species ID, and
-optionally a detection value and/or a category label) and reshapes it into
-the sites (rows) x species (columns) matrix expected by
+Takes one-row-per-record field data (a site ID, a species ID, and
+optionally a detection value and/or a habitat label) and reshapes it into
+the sites (rows) x species (columns) presence/absence matrix expected by
 \code{\link{beta_diversity}}, along with an aligned per-site group vector
-when a category column is supplied.
+when a group column is supplied.
 
-Site and species IDs are automatically trimmed of leading/trailing
-whitespace. Names differing only by case (e.g. "SiteA" vs "sitea") are
-kept as distinct sites/species, with a warning. Duplicate (site, species)
-records (e.g. repeat visits) are collapsed: a species is treated as
+Site and species IDs are trimmed of leading/trailing whitespace. Names
+differing only by case (e.g. "SiteA" vs "sitea") are kept as distinct
+sites/species, with a warning. Duplicate (site, species) records (e.g.
+repeat visits, or one row per individual) are collapsed: a species is
 present at a site if detected on any of its records there, reported via
-\code{message()} since this is expected, benign behavior for raw field
-data rather than a problem with the input.
+\code{message()} since this is expected for raw field data.
 }
 \examples{
 records <- data.frame(
-  site = c("s1", "s1", "s2", "s2", "s3"),
+  site    = c("s1", "s1", "s2", "s2", "s3"),
   species = c("sp1", "sp2", "sp1", "sp3", "sp2"),
-  seen = c("Y", "Y", "yes", "N", "Y"),
+  seen    = c("Y", "Y", "yes", "N", "Y"),
   habitat = c("tree", "tree", "open", "open", "tree")
 )
+# s4 was surveyed but nothing was found there
+sites <- data.frame(site = c("s1", "s2", "s3", "s4"),
+                    habitat = c("tree", "open", "tree", "open"))
 res <- as_site_by_species(records, site = "site", species = "species",
-                           value = "seen", group = "habitat")
+                          value = "seen", group = "habitat",
+                          all_sites = sites)
 res$x
 res$group
-beta_diversity(res$x, group = res$group)
+
+# A full example with enough sites per habitat:
+path <- system.file("extdata", "example_survey.csv",
+                    package = "kifbetadiversity")
+head(read.csv(path))
 
 }
 \seealso{

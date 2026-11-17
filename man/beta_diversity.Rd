@@ -2,7 +2,7 @@
 % Please edit documentation in R/beta_diversity.R
 \name{beta_diversity}
 \alias{beta_diversity}
-\title{Beta diversity point estimates and confidence intervals (Kiflawi & Spencer 2004)}
+\title{Beta diversity point estimate and confidence interval (Kiflawi & Spencer 2004)}
 \usage{
 beta_diversity(x, group = NULL, conf = 0.95)
 }
@@ -11,64 +11,85 @@ beta_diversity(x, group = NULL, conf = 0.95)
 numeric or logical. Values are treated as present if > 0, so either
 presence/absence (0/1, TRUE/FALSE) or raw abundance/count data may be
 supplied directly. \code{NA} values are treated as absence (with a
-warning). Errors if \code{x} is non-numeric, contains negative or
-non-finite values, has fewer than 2 sites or 1 species, or if the
-estimated gamma diversity is not greater than alpha (e.g. because a
-species is present at every site, making beta_M undefined). Warns if
-there are fewer than 10 sites, the smallest sample size Kiflawi &
-Spencer (2004) validated confidence-interval coverage for.}
+warning). Errors if \code{x} contains text (naming the column), negative
+or non-finite values, or has fewer than 2 sites or 1 species. Warns if
+there are fewer than 10 sites.}
 
 \item{group}{Optional vector of length \code{nrow(x)} assigning each site
-to a group (e.g. treatment/plot type); results are then computed
+to a group (e.g. habitat or treatment); results are then computed
 separately per group. Defaults to \code{NULL}, treating all sites as a
-single group. At most 5 distinct groups are supported (error above
-that). A group with fewer than 2 sites is skipped, with a warning,
-rather than failing the whole call. \code{NA} entries in \code{group}
-cause those sites to be dropped from the analysis, with a warning.}
+single group. At most 5 labelled groups are supported. Sites with a
+blank or missing (\code{NA}) label are not dropped: they are analysed
+together as their own group, reported as \code{NA} in the last row,
+with a warning naming them, so you can fix the labels. A group with
+fewer than 2 sites, or one where beta_M can't be estimated (see
+Value), is skipped with a warning while the other groups are returned.}
 
-\item{conf}{Confidence level for the intervals (default 0.95). Must be a
+\item{conf}{Confidence level for the interval (default 0.95). Must be a
 single number strictly between 0 and 1; errors otherwise (e.g. if you
 pass a percentage like 95 instead of 0.95).}
 }
 \value{
-A data.frame with one row per group (one row total if
-\code{group} is \code{NULL}), with columns: \code{group} (always
-\code{"All"} when ungrouped), \code{n_sites}, \code{gamma_obs},
-\code{gamma_hat}, \code{se_gamma_hat}, \code{alpha}, \code{se_alpha},
-\code{beta_M}, \code{se_ln_beta_M}, \code{beta_M_lwr}, \code{beta_M_upr},
-\code{beta_A}, \code{se_beta_A}, \code{beta_A_lwr}, \code{beta_A_upr}.
+A data.frame with one row per group (one row if \code{group} is
+\code{NULL}) and columns:
+\describe{
+\item{group}{Group label (\code{"All"} when ungrouped; \code{NA} for
+unlabelled sites).}
+\item{n_sites}{Number of sites, N.}
+\item{gamma_obs}{Species observed across all sites.}
+\item{gamma_hat}{Jackknife estimate of the true regional richness
+(Eq. 6a): observed species plus an estimate of those missed.}
+\item{se_gamma_hat}{Standard error of \code{gamma_hat} (Eq. 6b).}
+\item{alpha}{Mean number of species per site.}
+\item{se_alpha}{Standard error of \code{alpha} (Eq. 8b).}
+\item{beta_M}{Whittaker's multiplicative beta, \code{gamma_hat / alpha - 1}.
+It can be read as the odds that a species of average commonness is
+absent from a randomly chosen site; 0 means every site has every
+species.}
+\item{se_ln_beta_M}{Standard error of \code{log(beta_M)} (Eq. 7).}
+\item{beta_M_lwr, beta_M_upr}{Confidence interval for \code{beta_M}.
+It is built on the log scale, so it is not symmetric around
+\code{beta_M}.}
+}
+beta_M can't be estimated, and an error is raised (or the group is
+skipped, in a grouped call), when every site has exactly the same
+species or when no species were recorded at all.
 }
 \description{
 \ifelse{html}{\href{https://lifecycle.r-lib.org/articles/stages.html#experimental}{\figure{lifecycle-experimental.svg}{options: alt='[Experimental]'}}}{\strong{[Experimental]}}
 }
 \details{
-Computes Whittaker's multiplicative beta diversity (beta_M = gamma/alpha - 1)
-and Lande's additive beta diversity (beta_A = gamma - alpha) from a
-sites x species presence/absence matrix, along with analytical 95\%
-confidence intervals, following Kiflawi & Spencer (2004, Ecology 85:2895-2900).
-If \code{group} is supplied, sites are split by group and every quantity
-is computed separately per group.
+Computes Whittaker's multiplicative beta diversity,
+\eqn{\beta_M = \hat\gamma / \bar\alpha - 1}, from a sites x species
+presence/absence matrix, with an analytical confidence interval, following
+Kiflawi & Spencer (2004, Ecology 85:2895-2900). If \code{group} is
+supplied, sites are split by group and every quantity is computed
+separately per group.
 
-The true regional richness (gamma) is not observed directly; it is estimated
-via the first-order jackknife richness estimator (Heltshe & Forrester 1983),
-computed directly following Kiflawi & Spencer (2004) Eqs. 6a-6b. The point
-estimate (\code{gamma_hat}) is numerically identical to
+Observed regional richness undercounts the true species pool, because
+rare species are missed by a finite survey. Gamma is therefore estimated
+with the first-order jackknife (Heltshe & Forrester 1983), following
+Kiflawi & Spencer (2004) Eqs. 6a-6b, and its uncertainty is carried into
+the interval for beta_M (Eq. 7, delta method on \eqn{\ln\beta_M}). The
+point estimate (\code{gamma_hat}) is numerically identical to
 \code{vegan::specpool()}'s \code{jack1}; its standard error
-(\code{se_gamma_hat}) follows the paper's own Eq. 6b derivation and differs
-from \code{vegan::specpool()}'s \code{jack1.se}, which is based on a
-different derivation (Smith & van Belle 1984).
+(\code{se_gamma_hat}) follows the paper's own Eq. 6b and differs from
+\code{vegan::specpool()}'s \code{jack1.se}, which uses a different
+derivation (Smith & van Belle 1984).
 }
 \examples{
 set.seed(1)
-x <- matrix(rbinom(8 * 10, 1, 0.35), nrow = 8,
-             dimnames = list(paste0("site", 1:8), paste0("sp", 1:10)))
+x <- matrix(rbinom(30 * 15, 1, 0.3), nrow = 30,
+            dimnames = list(paste0("site", 1:30), paste0("sp", 1:15)))
 beta_diversity(x)
 
-set.seed(1)
-x2 <- matrix(rbinom(20 * 10, 1, 0.35), nrow = 20)
-treatment <- rep(c("control", "npk"), each = 10)
-beta_diversity(x2, group = treatment)
+habitat <- rep(c("open", "tree"), each = 15)
+beta_diversity(x, group = habitat)
 
+}
+\references{
+Kiflawi, M., & Spencer, M. (2004). Confidence intervals and
+hypothesis testing for beta diversity. \emph{Ecology}, 85(10), 2895-2900.
 }
 \seealso{
 Other beta diversity functions: 

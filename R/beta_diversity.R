@@ -1,4 +1,42 @@
-#' Point estimates and CIs for a single site-by-species matrix (internal)
+#' Signal that beta_M can't be estimated for a set of sites (internal)
+#'
+#' A classed error, so that a grouped run in \code{beta_diversity()} can skip
+#' just the affected group instead of failing the whole call.
+#' @noRd
+.stop_no_turnover <- function(msg) {
+  stop(structure(
+    class = c("kifbeta_no_turnover", "error", "condition"),
+    list(message = msg, call = NULL)
+  ))
+}
+
+#' Turn blank / whitespace-only group labels into NA (internal)
+#' @noRd
+.clean_group <- function(group) {
+  g <- trimws(as.character(group))
+  g[!is.na(g) & g == ""] <- NA_character_
+  g
+}
+
+#' Short, human-readable list of site names (internal)
+#' @noRd
+.list_sites <- function(sites, max_show = 10) {
+  sites <- as.character(sites)
+  if (length(sites) <= max_show) {
+    return(paste(sites, collapse = ", "))
+  }
+  paste0(paste(sites[seq_len(max_show)], collapse = ", "),
+         ", and ", length(sites) - max_show, " more")
+}
+
+#' Site names of the rows of x, falling back to row numbers (internal)
+#' @noRd
+.site_names <- function(x, rows) {
+  rn <- rownames(x)
+  if (is.null(rn)) paste0("row ", rows) else rn[rows]
+}
+
+#' Point estimates and CI for a single site-by-species matrix (internal)
 #'
 #' Not exported. Contains the full Kiflawi & Spencer (2004) computation and
 #' all of its input validation. \code{\link{beta_diversity}} is a thin
@@ -33,8 +71,10 @@
     stop("beta_diversity() requires at least 2 sites (rows); got ", N)
   }
   if (N < 10) {
-    warning("N = ", N, " sites is below 10, the smallest sample size Kiflawi & ",
-            "Spencer (2004) validated CI coverage for; results may be unreliable")
+    warning("Only N = ", N, " sites. Kiflawi & Spencer's (2004) simulations ",
+            "found the beta_M confidence interval can be unreliable with few ",
+            "sites (it was reasonably reliable from about 30 sites), so treat ",
+            "this interval with caution.")
   }
 
   # Eq. 6a: first-order jackknife estimate of gamma richness. freq[j] = number
@@ -58,33 +98,37 @@
 
   site_rich <- rowSums(x > 0)
   alpha <- mean(site_rich)
-  # Sampling variance of alpha (mean local richness): algebraically equivalent
-  # to Kiflawi & Spencer's Eq. 8 (species-pairwise covariance form), but
-  # simplifies to the ordinary standard-error-of-the-mean of per-site richness.
+  # Eq. 8b: sampling variance of alpha (mean local richness). This is the
+  # population-variance form, sum((s_i - alpha)^2) / N^2, i.e.
+  # var(s_i) * (N - 1) / N^2 -- slightly smaller than the ordinary squared
+  # standard error of the mean, var(s_i) / N.
   var_alpha <- var(site_rich) * (N - 1) / N^2
   se_alpha <- sqrt(var_alpha)
 
+  # gamma_hat >= gamma_obs >= max(site richness) >= alpha always, so
+  # gamma_hat == alpha only happens in the two cases below. beta_M is then 0
+  # (or 0/0), and its log-scale interval (Eq. 7) is undefined.
+  if (alpha == 0) {
+    .stop_no_turnover(paste0(
+      "beta_M can't be estimated: no species were recorded at any of the ",
+      N, " sites."))
+  }
   if (gamma_hat <= alpha) {
-    stop("beta_M is undefined: estimated gamma (", round(gamma_hat, 3),
-         ") is not greater than alpha (", round(alpha, 3), "). This happens ",
-         "when one or more species are present at every site. Consider using ",
-         "beta_A, or removing ubiquitous species before calling beta_diversity().")
+    .stop_no_turnover(paste0(
+      "beta_M can't be estimated: every one of the ", N, " sites has exactly ",
+      "the same ", gamma_obs, " species, so there is no turnover between ",
+      "sites (beta_M = 0) and no confidence interval can be put around it."))
   }
 
   beta_M <- gamma_hat / alpha - 1
-  beta_A <- gamma_hat - alpha
 
   # Delta-method variance of ln(beta_M), Eq. 7
   var_ln_beta_M <- (gamma_hat / (alpha * (gamma_hat - alpha)))^2 * var_alpha +
     (1 / (gamma_hat - alpha))^2 * se_gamma_hat^2
   se_ln_beta_M <- sqrt(var_ln_beta_M)
 
-  se_beta_A <- sqrt(se_gamma_hat^2 + var_alpha)
-
   z <- qnorm(1 - (1 - conf) / 2)
-
   beta_M_ci <- beta_M * exp(c(-1, 1) * z * se_ln_beta_M)
-  beta_A_ci <- beta_A + c(-1, 1) * z * se_beta_A
 
   data.frame(
     n_sites = N,
@@ -96,76 +140,13 @@
     beta_M = beta_M,
     se_ln_beta_M = se_ln_beta_M,
     beta_M_lwr = beta_M_ci[1],
-    beta_M_upr = beta_M_ci[2],
-    beta_A = beta_A,
-    se_beta_A = se_beta_A,
-    beta_A_lwr = beta_A_ci[1],
-    beta_A_upr = beta_A_ci[2]
+    beta_M_upr = beta_M_ci[2]
   )
 }
 
-#' Beta diversity point estimates and confidence intervals (Kiflawi & Spencer 2004)
-#'
-#' `r lifecycle::badge("experimental")`
-#'
-#' Computes Whittaker's multiplicative beta diversity (beta_M = gamma/alpha - 1)
-#' and Lande's additive beta diversity (beta_A = gamma - alpha) from a
-#' sites x species presence/absence matrix, along with analytical 95%
-#' confidence intervals, following Kiflawi & Spencer (2004, Ecology 85:2895-2900).
-#' If \code{group} is supplied, sites are split by group and every quantity
-#' is computed separately per group.
-#'
-#' The true regional richness (gamma) is not observed directly; it is estimated
-#' via the first-order jackknife richness estimator (Heltshe & Forrester 1983),
-#' computed directly following Kiflawi & Spencer (2004) Eqs. 6a-6b. The point
-#' estimate (\code{gamma_hat}) is numerically identical to
-#' \code{vegan::specpool()}'s \code{jack1}; its standard error
-#' (\code{se_gamma_hat}) follows the paper's own Eq. 6b derivation and differs
-#' from \code{vegan::specpool()}'s \code{jack1.se}, which is based on a
-#' different derivation (Smith & van Belle 1984).
-#'
-#' @param x A sites (rows) x species (columns) matrix or data.frame,
-#'   numeric or logical. Values are treated as present if > 0, so either
-#'   presence/absence (0/1, TRUE/FALSE) or raw abundance/count data may be
-#'   supplied directly. \code{NA} values are treated as absence (with a
-#'   warning). Errors if \code{x} is non-numeric, contains negative or
-#'   non-finite values, has fewer than 2 sites or 1 species, or if the
-#'   estimated gamma diversity is not greater than alpha (e.g. because a
-#'   species is present at every site, making beta_M undefined). Warns if
-#'   there are fewer than 10 sites, the smallest sample size Kiflawi &
-#'   Spencer (2004) validated confidence-interval coverage for.
-#' @param group Optional vector of length \code{nrow(x)} assigning each site
-#'   to a group (e.g. treatment/plot type); results are then computed
-#'   separately per group. Defaults to \code{NULL}, treating all sites as a
-#'   single group. At most 5 distinct groups are supported (error above
-#'   that). A group with fewer than 2 sites is skipped, with a warning,
-#'   rather than failing the whole call. \code{NA} entries in \code{group}
-#'   cause those sites to be dropped from the analysis, with a warning.
-#' @param conf Confidence level for the intervals (default 0.95). Must be a
-#'   single number strictly between 0 and 1; errors otherwise (e.g. if you
-#'   pass a percentage like 95 instead of 0.95).
-#'
-#' @return A data.frame with one row per group (one row total if
-#'   \code{group} is \code{NULL}), with columns: \code{group} (always
-#'   \code{"All"} when ungrouped), \code{n_sites}, \code{gamma_obs},
-#'   \code{gamma_hat}, \code{se_gamma_hat}, \code{alpha}, \code{se_alpha},
-#'   \code{beta_M}, \code{se_ln_beta_M}, \code{beta_M_lwr}, \code{beta_M_upr},
-#'   \code{beta_A}, \code{se_beta_A}, \code{beta_A_lwr}, \code{beta_A_upr}.
-#'
-#' @examples
-#' set.seed(1)
-#' x <- matrix(rbinom(8 * 10, 1, 0.35), nrow = 8,
-#'              dimnames = list(paste0("site", 1:8), paste0("sp", 1:10)))
-#' beta_diversity(x)
-#'
-#' set.seed(1)
-#' x2 <- matrix(rbinom(20 * 10, 1, 0.35), nrow = 20)
-#' treatment <- rep(c("control", "npk"), each = 10)
-#' beta_diversity(x2, group = treatment)
-#'
-#' @family beta diversity functions
-#' @export
-beta_diversity <- function(x, group = NULL, conf = 0.95) {
+#' Validate the conf argument (internal)
+#' @noRd
+.check_conf <- function(conf) {
   if (!is.numeric(conf) || length(conf) != 1 || is.na(conf)) {
     stop("conf must be a single number between 0 and 1 ",
          "(e.g. 0.95 for a 95% confidence interval); got ",
@@ -179,8 +160,113 @@ beta_diversity <- function(x, group = NULL, conf = 0.95) {
     stop("conf must be strictly between 0 and 1 ",
          "(e.g. 0.95 for a 95% confidence interval); got conf = ", conf)
   }
+  invisible(NULL)
+}
 
-  x <- as.matrix(x)
+#' Coerce x to a matrix, explaining text columns in a data frame (internal)
+#' @noRd
+.as_site_matrix <- function(x) {
+  if (is.data.frame(x)) {
+    is_text <- !vapply(x, function(col) is.numeric(col) || is.logical(col),
+                       logical(1))
+    if (any(is_text)) {
+      text_cols <- names(x)[is_text]
+      stop("x must contain only numbers or TRUE/FALSE values, but column(s) ",
+           paste0("'", text_cols, "'", collapse = ", "), " contain text. ",
+           "If that is a column of site names (common when a wide table is ",
+           "read with read.csv()), make it the row names instead, e.g. ",
+           "read.csv(\"file.csv\", row.names = 1). If your data is one row ",
+           "per record (site, species, ...), reshape it first with ",
+           "as_site_by_species().")
+    }
+  }
+  as.matrix(x)
+}
+
+#' Beta diversity point estimate and confidence interval (Kiflawi & Spencer 2004)
+#'
+#' `r lifecycle::badge("experimental")`
+#'
+#' Computes Whittaker's multiplicative beta diversity,
+#' \eqn{\beta_M = \hat\gamma / \bar\alpha - 1}, from a sites x species
+#' presence/absence matrix, with an analytical confidence interval, following
+#' Kiflawi & Spencer (2004, Ecology 85:2895-2900). If \code{group} is
+#' supplied, sites are split by group and every quantity is computed
+#' separately per group.
+#'
+#' Observed regional richness undercounts the true species pool, because
+#' rare species are missed by a finite survey. Gamma is therefore estimated
+#' with the first-order jackknife (Heltshe & Forrester 1983), following
+#' Kiflawi & Spencer (2004) Eqs. 6a-6b, and its uncertainty is carried into
+#' the interval for beta_M (Eq. 7, delta method on \eqn{\ln\beta_M}). The
+#' point estimate (\code{gamma_hat}) is numerically identical to
+#' \code{vegan::specpool()}'s \code{jack1}; its standard error
+#' (\code{se_gamma_hat}) follows the paper's own Eq. 6b and differs from
+#' \code{vegan::specpool()}'s \code{jack1.se}, which uses a different
+#' derivation (Smith & van Belle 1984).
+#'
+#' @param x A sites (rows) x species (columns) matrix or data.frame,
+#'   numeric or logical. Values are treated as present if > 0, so either
+#'   presence/absence (0/1, TRUE/FALSE) or raw abundance/count data may be
+#'   supplied directly. \code{NA} values are treated as absence (with a
+#'   warning). Errors if \code{x} contains text (naming the column), negative
+#'   or non-finite values, or has fewer than 2 sites or 1 species. Warns if
+#'   there are fewer than 10 sites.
+#' @param group Optional vector of length \code{nrow(x)} assigning each site
+#'   to a group (e.g. habitat or treatment); results are then computed
+#'   separately per group. Defaults to \code{NULL}, treating all sites as a
+#'   single group. At most 5 labelled groups are supported. Sites with a
+#'   blank or missing (\code{NA}) label are not dropped: they are analysed
+#'   together as their own group, reported as \code{NA} in the last row,
+#'   with a warning naming them, so you can fix the labels. A group with
+#'   fewer than 2 sites, or one where beta_M can't be estimated (see
+#'   Value), is skipped with a warning while the other groups are returned.
+#' @param conf Confidence level for the interval (default 0.95). Must be a
+#'   single number strictly between 0 and 1; errors otherwise (e.g. if you
+#'   pass a percentage like 95 instead of 0.95).
+#'
+#' @return A data.frame with one row per group (one row if \code{group} is
+#'   \code{NULL}) and columns:
+#'   \describe{
+#'     \item{group}{Group label (\code{"All"} when ungrouped; \code{NA} for
+#'       unlabelled sites).}
+#'     \item{n_sites}{Number of sites, N.}
+#'     \item{gamma_obs}{Species observed across all sites.}
+#'     \item{gamma_hat}{Jackknife estimate of the true regional richness
+#'       (Eq. 6a): observed species plus an estimate of those missed.}
+#'     \item{se_gamma_hat}{Standard error of \code{gamma_hat} (Eq. 6b).}
+#'     \item{alpha}{Mean number of species per site.}
+#'     \item{se_alpha}{Standard error of \code{alpha} (Eq. 8b).}
+#'     \item{beta_M}{Whittaker's multiplicative beta, \code{gamma_hat / alpha - 1}.
+#'       It can be read as the odds that a species of average commonness is
+#'       absent from a randomly chosen site; 0 means every site has every
+#'       species.}
+#'     \item{se_ln_beta_M}{Standard error of \code{log(beta_M)} (Eq. 7).}
+#'     \item{beta_M_lwr, beta_M_upr}{Confidence interval for \code{beta_M}.
+#'       It is built on the log scale, so it is not symmetric around
+#'       \code{beta_M}.}
+#'   }
+#'   beta_M can't be estimated, and an error is raised (or the group is
+#'   skipped, in a grouped call), when every site has exactly the same
+#'   species or when no species were recorded at all.
+#'
+#' @references Kiflawi, M., & Spencer, M. (2004). Confidence intervals and
+#'   hypothesis testing for beta diversity. \emph{Ecology}, 85(10), 2895-2900.
+#'
+#' @examples
+#' set.seed(1)
+#' x <- matrix(rbinom(30 * 15, 1, 0.3), nrow = 30,
+#'             dimnames = list(paste0("site", 1:30), paste0("sp", 1:15)))
+#' beta_diversity(x)
+#'
+#' habitat <- rep(c("open", "tree"), each = 15)
+#' beta_diversity(x, group = habitat)
+#'
+#' @family beta diversity functions
+#' @export
+beta_diversity <- function(x, group = NULL, conf = 0.95) {
+  .check_conf(conf)
+  x <- .as_site_matrix(x)
 
   if (is.null(group)) {
     result <- .beta_diversity_one(x, conf)
@@ -189,80 +275,183 @@ beta_diversity <- function(x, group = NULL, conf = 0.95) {
   }
 
   if (length(group) != nrow(x)) {
-    stop("length(group) must equal nrow(x); got ", length(group),
-         " and ", nrow(x))
+    stop("group must give one label per site: length(group) is ",
+         length(group), " but x has ", nrow(x), " sites (rows)")
   }
 
-  if (anyNA(group)) {
-    n_dropped <- sum(is.na(group))
-    warning(n_dropped, " site(s) have a blank/missing group label and were ",
-            "dropped from the analysis")
-    x <- x[!is.na(group), , drop = FALSE]
-    group <- group[!is.na(group)]
+  group <- .clean_group(group)
+  unlabelled <- is.na(group)
+  if (any(unlabelled)) {
+    warning(sum(unlabelled), " site(s) have a blank or missing group label: ",
+            .list_sites(.site_names(x, which(unlabelled))), ". They are ",
+            "analysed together as a separate group, shown as NA in the ",
+            "results. Fix their labels in your data, or remove those sites, ",
+            "before reporting results.")
   }
 
-  groups <- sort(unique(group))
-  if (length(groups) > 5) {
-    stop("beta_diversity() supports at most 5 groups; got ", length(groups))
+  labelled_groups <- sort(unique(group[!unlabelled]))
+  if (length(labelled_groups) > 5) {
+    stop("beta_diversity() supports at most 5 groups; got ",
+         length(labelled_groups), ": ",
+         paste(labelled_groups, collapse = ", "))
   }
+  groups <- if (any(unlabelled)) c(labelled_groups, NA) else labelled_groups
 
   results <- list()
   for (g in groups) {
-    x_g <- x[group == g, , drop = FALSE]
+    in_g <- if (is.na(g)) unlabelled else (!unlabelled & group == g)
+    label <- if (is.na(g)) "NA (unlabelled sites)" else paste0("'", g, "'")
+    x_g <- x[in_g, , drop = FALSE]
     if (nrow(x_g) < 2) {
-      warning("Group '", g, "' has fewer than 2 sites and was skipped")
+      warning("Group ", label, " has fewer than 2 sites and was skipped")
       next
     }
-    r <- .beta_diversity_one(x_g, conf)
-    r$group <- as.character(g)
+    r <- tryCatch(
+      .beta_diversity_one(x_g, conf),
+      kifbeta_no_turnover = function(e) {
+        warning("Group ", label, " was skipped. ", conditionMessage(e),
+                call. = FALSE)
+        NULL
+      }
+    )
+    if (is.null(r)) next
+    r$group <- if (is.na(g)) NA_character_ else as.character(g)
     results[[length(results) + 1]] <- r
   }
 
   if (length(results) == 0) {
-    stop("No group had at least 2 sites; nothing to return")
+    stop("No group could be analysed (each had fewer than 2 sites, or no ",
+         "turnover between its sites); nothing to return. See the warnings ",
+         "above for each group.")
   }
 
   out <- do.call(rbind, results)
+  rownames(out) <- NULL
   out[, c("group", setdiff(names(out), "group"))]
 }
 
-#' Two-sample hypothesis test for beta diversity (Kiflawi & Spencer 2004)
+#' Two-sample test: do two habitats differ in beta diversity? (Kiflawi & Spencer 2004)
 #'
 #' `r lifecycle::badge("experimental")`
 #'
-#' Tests whether two independent site-sets differ in beta diversity, for both
-#' the multiplicative (beta_M) and additive (beta_A) measures, following
-#' Eqs. 10a-10b of Kiflawi & Spencer (2004).
+#' Tests whether two independent sets of sites (e.g. two habitats) differ in
+#' Whittaker's multiplicative beta diversity, using the Z-test of Kiflawi &
+#' Spencer (2004), Eq. 10a:
+#' \deqn{Z = \ln(\beta_{M,1} / \beta_{M,2}) /
+#'   \sqrt{Var[\ln\beta_{M,1}] + Var[\ln\beta_{M,2}]}}
 #'
-#' @param x,y Sites x species presence/absence matrices or data.frames for
-#'   the two independent samples being compared.
+#' Give the two samples either as two separate tables (\code{x} and
+#' \code{y}), or as one table plus a \code{group} vector with exactly two
+#' labels.
+#'
+#' @section Assumptions and limitations:
+#' \itemize{
+#'   \item \strong{Independent, randomly sampled sites.} The standard errors
+#'     assume every site is an independent random sample from its habitat.
+#'     Spatially clumped designs (e.g. several traps under the same tree),
+#'     paired designs (e.g. a tree trap and an open trap at the same
+#'     location) or block designs carry less independent information than
+#'     their number of sites suggests. The standard errors are then too
+#'     small and Z too large, so a "significant" result may not be. Consider
+#'     using a coarser, more independent unit (e.g. pool the traps of one
+#'     tree into one site).
+#'   \item \strong{The two samples must be independent of each other.}
+#'   \item \strong{Comparable sampling effort.} The jackknife reduces the
+#'     effect of sampling effort on estimated gamma, but does not remove it,
+#'     and the largest possible beta_M grows with the number of sites (with
+#'     observed gamma, beta_M can't exceed N - 1). Compare habitats sampled with a similar number of sites and
+#'     similar effort per site.
+#'   \item \strong{Enough sites.} In the paper's simulations the beta_M
+#'     interval was reasonably reliable from about 30 sites per sample, and
+#'     could be poor with 10.
+#'   \item \strong{Include empty sites.} Sites surveyed where nothing was
+#'     found must be included (see the \code{all_sites} argument of
+#'     \code{\link{as_site_by_species}}); leaving them out makes beta_M too
+#'     low.
+#' }
+#'
+#' @param x A sites x species matrix or data.frame (see
+#'   \code{\link{beta_diversity}}). Either the first sample (with \code{y}),
+#'   or all sites of both samples (with \code{group}).
+#' @param y A sites x species matrix or data.frame for the second sample.
+#'   Give either \code{y} or \code{group}, not both.
 #' @param conf Confidence level, passed through to the underlying
 #'   \code{\link{beta_diversity}} calls (does not affect the test itself).
+#' @param group A vector of length \code{nrow(x)} with exactly two distinct
+#'   labels, splitting the sites of \code{x} into the two samples. Sites with
+#'   a blank or missing label are left out of the test, with a warning.
 #'
-#' @return A one-row data.frame with columns \code{Z_beta_M}, \code{p_beta_M},
-#'   \code{Z_beta_A}, \code{p_beta_A} (two-tailed p-values).
+#' @return A one-row data.frame with columns \code{group_1}, \code{group_2}
+#'   (the two sample labels: \code{"x"} and \code{"y"}, or the two
+#'   \code{group} labels in sorted order), \code{beta_M_1}, \code{beta_M_2},
+#'   \code{Z_beta_M} (positive when \code{group_1} has the higher beta_M) and
+#'   \code{p_beta_M} (two-tailed p-value).
+#'
+#' @references Kiflawi, M., & Spencer, M. (2004). Confidence intervals and
+#'   hypothesis testing for beta diversity. \emph{Ecology}, 85(10), 2895-2900.
 #'
 #' @examples
 #' set.seed(1)
-#' x <- matrix(rbinom(8 * 10, 1, 0.35), nrow = 8)
-#' y <- matrix(rbinom(8 * 10, 1, 0.35), nrow = 8)
-#' beta_diversity_test(x, y)
+#' open <- matrix(rbinom(30 * 15, 1, 0.45), nrow = 30)
+#' tree <- matrix(rbinom(30 * 15, 1, 0.20), nrow = 30)
+#' beta_diversity_test(open, tree)
+#'
+#' # Or: one table plus a group vector
+#' both <- rbind(open, tree)
+#' habitat <- rep(c("open", "tree"), each = 30)
+#' beta_diversity_test(both, group = habitat)
 #'
 #' @family beta diversity functions
 #' @export
-beta_diversity_test <- function(x, y, conf = 0.95) {
-  s1 <- beta_diversity(x, conf = conf)
-  s2 <- beta_diversity(y, conf = conf)
+beta_diversity_test <- function(x, y = NULL, conf = 0.95, group = NULL) {
+  if (is.null(y) == is.null(group)) {
+    stop("Give the two samples either as two tables, ",
+         "beta_diversity_test(x, y), or as one table plus a group vector ",
+         "with two labels, beta_diversity_test(x, group = habitat) -- ",
+         "exactly one of `y` or `group`.")
+  }
 
+  if (!is.null(y)) {
+    s1 <- beta_diversity(x, conf = conf)
+    s2 <- beta_diversity(y, conf = conf)
+    labels <- c("x", "y")
+  } else {
+    x <- .as_site_matrix(x)
+    if (length(group) != nrow(x)) {
+      stop("group must give one label per site: length(group) is ",
+           length(group), " but x has ", nrow(x), " sites (rows)")
+    }
+    group <- .clean_group(group)
+    unlabelled <- is.na(group)
+    if (any(unlabelled)) {
+      warning(sum(unlabelled), " site(s) have a blank or missing group ",
+              "label and were left out of the test: ",
+              .list_sites(.site_names(x, which(unlabelled))), ". Fix their ",
+              "labels in your data to include them.")
+      x <- x[!unlabelled, , drop = FALSE]
+      group <- group[!unlabelled]
+    }
+    labels <- sort(unique(group))
+    if (length(labels) != 2) {
+      stop("beta_diversity_test() compares exactly 2 groups, but `group` ",
+           "has ", length(labels), ": ", paste(labels, collapse = ", "),
+           ". To compare two of them, subset your data first, e.g. ",
+           "keep <- group %in% c(\"A\", \"B\").")
+    }
+    s1 <- beta_diversity(x[group == labels[1], , drop = FALSE], conf = conf)
+    s2 <- beta_diversity(x[group == labels[2], , drop = FALSE], conf = conf)
+  }
+
+  # Eq. 10a
   Z_beta_M <- log(s1$beta_M / s2$beta_M) /
     sqrt(s1$se_ln_beta_M^2 + s2$se_ln_beta_M^2)
-  Z_beta_A <- (s1$beta_A - s2$beta_A) /
-    sqrt(s1$se_beta_A^2 + s2$se_beta_A^2)
 
   data.frame(
+    group_1 = labels[1],
+    group_2 = labels[2],
+    beta_M_1 = s1$beta_M,
+    beta_M_2 = s2$beta_M,
     Z_beta_M = Z_beta_M,
-    p_beta_M = 2 * pnorm(-abs(Z_beta_M)),
-    Z_beta_A = Z_beta_A,
-    p_beta_A = 2 * pnorm(-abs(Z_beta_A))
+    p_beta_M = 2 * pnorm(-abs(Z_beta_M))
   )
 }

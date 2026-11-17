@@ -2,35 +2,89 @@
 % Please edit documentation in R/beta_diversity.R
 \name{beta_diversity_test}
 \alias{beta_diversity_test}
-\title{Two-sample hypothesis test for beta diversity (Kiflawi & Spencer 2004)}
+\title{Two-sample test: do two habitats differ in beta diversity? (Kiflawi & Spencer 2004)}
 \usage{
-beta_diversity_test(x, y, conf = 0.95)
+beta_diversity_test(x, y = NULL, conf = 0.95, group = NULL)
 }
 \arguments{
-\item{x, y}{Sites x species presence/absence matrices or data.frames for
-the two independent samples being compared.}
+\item{x}{A sites x species matrix or data.frame (see
+\code{\link{beta_diversity}}). Either the first sample (with \code{y}),
+or all sites of both samples (with \code{group}).}
+
+\item{y}{A sites x species matrix or data.frame for the second sample.
+Give either \code{y} or \code{group}, not both.}
 
 \item{conf}{Confidence level, passed through to the underlying
 \code{\link{beta_diversity}} calls (does not affect the test itself).}
+
+\item{group}{A vector of length \code{nrow(x)} with exactly two distinct
+labels, splitting the sites of \code{x} into the two samples. Sites with
+a blank or missing label are left out of the test, with a warning.}
 }
 \value{
-A one-row data.frame with columns \code{Z_beta_M}, \code{p_beta_M},
-\code{Z_beta_A}, \code{p_beta_A} (two-tailed p-values).
+A one-row data.frame with columns \code{group_1}, \code{group_2}
+(the two sample labels: \code{"x"} and \code{"y"}, or the two
+\code{group} labels in sorted order), \code{beta_M_1}, \code{beta_M_2},
+\code{Z_beta_M} (positive when \code{group_1} has the higher beta_M) and
+\code{p_beta_M} (two-tailed p-value).
 }
 \description{
 \ifelse{html}{\href{https://lifecycle.r-lib.org/articles/stages.html#experimental}{\figure{lifecycle-experimental.svg}{options: alt='[Experimental]'}}}{\strong{[Experimental]}}
 }
 \details{
-Tests whether two independent site-sets differ in beta diversity, for both
-the multiplicative (beta_M) and additive (beta_A) measures, following
-Eqs. 10a-10b of Kiflawi & Spencer (2004).
+Tests whether two independent sets of sites (e.g. two habitats) differ in
+Whittaker's multiplicative beta diversity, using the Z-test of Kiflawi &
+Spencer (2004), Eq. 10a:
+\deqn{Z = \ln(\beta_{M,1} / \beta_{M,2}) /
+  \sqrt{Var[\ln\beta_{M,1}] + Var[\ln\beta_{M,2}]}}
+
+Give the two samples either as two separate tables (\code{x} and
+\code{y}), or as one table plus a \code{group} vector with exactly two
+labels.
 }
+\section{Assumptions and limitations}{
+
+\itemize{
+\item \strong{Independent, randomly sampled sites.} The standard errors
+assume every site is an independent random sample from its habitat.
+Spatially clumped designs (e.g. several traps under the same tree),
+paired designs (e.g. a tree trap and an open trap at the same
+location) or block designs carry less independent information than
+their number of sites suggests. The standard errors are then too
+small and Z too large, so a "significant" result may not be. Consider
+using a coarser, more independent unit (e.g. pool the traps of one
+tree into one site).
+\item \strong{The two samples must be independent of each other.}
+\item \strong{Comparable sampling effort.} The jackknife reduces the
+effect of sampling effort on estimated gamma, but does not remove it,
+and the largest possible beta_M grows with the number of sites (with
+observed gamma, beta_M can't exceed N - 1). Compare habitats sampled with a similar number of sites and
+similar effort per site.
+\item \strong{Enough sites.} In the paper's simulations the beta_M
+interval was reasonably reliable from about 30 sites per sample, and
+could be poor with 10.
+\item \strong{Include empty sites.} Sites surveyed where nothing was
+found must be included (see the \code{all_sites} argument of
+\code{\link{as_site_by_species}}); leaving them out makes beta_M too
+low.
+}
+}
+
 \examples{
 set.seed(1)
-x <- matrix(rbinom(8 * 10, 1, 0.35), nrow = 8)
-y <- matrix(rbinom(8 * 10, 1, 0.35), nrow = 8)
-beta_diversity_test(x, y)
+open <- matrix(rbinom(30 * 15, 1, 0.45), nrow = 30)
+tree <- matrix(rbinom(30 * 15, 1, 0.20), nrow = 30)
+beta_diversity_test(open, tree)
 
+# Or: one table plus a group vector
+both <- rbind(open, tree)
+habitat <- rep(c("open", "tree"), each = 30)
+beta_diversity_test(both, group = habitat)
+
+}
+\references{
+Kiflawi, M., & Spencer, M. (2004). Confidence intervals and
+hypothesis testing for beta diversity. \emph{Ecology}, 85(10), 2895-2900.
 }
 \seealso{
 Other beta diversity functions: 

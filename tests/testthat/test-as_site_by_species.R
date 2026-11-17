@@ -80,7 +80,7 @@ test_that("NA in value is treated as absence, with a warning", {
   expect_warning(
     res <- as_site_by_species(records, site = "site", species = "species",
                                value = "seen", all_sites = "s1"),
-    "NA"
+    "blank/missing"
   )
   expect_equal(res$x["s1", "sp2"], 0)
 })
@@ -315,7 +315,142 @@ test_that("reshaping a long-format equivalent of the canonical 7x9 toy matrix ma
 
   expect_warning(
     summary_tbl <- beta_diversity(res$x),
-    "below 10"
+    "Only N = "
   )
   expect_equal(summary_tbl$gamma_obs, 9)
+})
+
+## ---- CSV-shaped input (read.csv() quirks real users hit) ----
+
+test_that("blank value cells in a CSV count as absence, with a warning (not a crash)", {
+  records <- read.csv(text = paste(
+    "site,species,seen",
+    "s1,sp1,Y",
+    "s1,sp2,",
+    "s2,sp1,  ",
+    "s2,sp3,yes",
+    sep = "\n"))
+  expect_type(records$seen, "character")  # read.csv reads blanks as ""
+  expect_warning(
+    res <- as_site_by_species(records, site = "site", species = "species",
+                              value = "seen", all_sites = c("s1", "s2")),
+    "2 row\\(s\\) have a blank/missing value"
+  )
+  expect_equal(res$x["s1", "sp2"], 0)
+  expect_equal(res$x["s2", "sp1"], 0)
+  expect_equal(res$x["s2", "sp3"], 1)
+})
+
+test_that("blank species or site names in a CSV error, giving the row numbers", {
+  records <- read.csv(text = "site,species\ns1,sp1\ns1,\ns2,sp2\n")
+  expect_error(
+    as_site_by_species(records, site = "site", species = "species"),
+    "row\\(s\\) 2\\)"
+  )
+  records <- read.csv(text = "site,species\ns1,sp1\n,sp1\n")
+  expect_error(
+    as_site_by_species(records, site = "site", species = "species"),
+    "blank or missing site name"
+  )
+})
+
+test_that("a matrix passed to as_site_by_species() gets a clear message, not '0 rows'", {
+  m <- matrix(1, 2, 2)
+  expect_error(as_site_by_species(m, site = "site", species = "species"),
+               "needs a data frame")
+})
+
+test_that("all_sites as a table gives empty sites their group (hand-verified beta_M)", {
+  # open: o1-o5 have 3 species each, o6 was surveyed but nothing was found.
+  # tree: t1-t3, just to make a second group.
+  records <- read.csv(text = paste(
+    "site,species,habitat",
+    "o1,a,open", "o1,b,open", "o1,c,open",
+    "o2,a,open", "o2,b,open", "o2,d,open",
+    "o3,a,open", "o3,c,open", "o3,e,open",
+    "o4,b,open", "o4,c,open", "o4,f,open",
+    "o5,a,open", "o5,b,open", "o5,c,open",
+    "t1,a,tree", "t2,g,tree", "t3,h,tree",
+    sep = "\n"))
+  sites <- read.csv(text = paste(
+    c("site,habitat,notes",
+      paste0("o", 1:6, ",open,"), paste0("t", 1:3, ",tree,")),
+    collapse = "\n"))
+
+  res <- as_site_by_species(records, site = "site", species = "species",
+                            group = "habitat", all_sites = sites)
+  expect_equal(unname(res$group[rownames(res$x) == "o6"]), "open")
+  expect_equal(sum(res$x["o6", ]), 0)
+
+  out <- suppressWarnings(beta_diversity(res$x, group = res$group))
+  open <- out[out$group == "open", ]
+  # Hand calculation: N = 6, alpha = 15 / 6 = 2.5, gamma_obs = 6 (a-f),
+  # u = 3 (d, e, f), gamma_hat = 6 + 3 * 5/6 = 8.5, beta_M = 8.5/2.5 - 1 = 2.4.
+  # Without o6 it would be N = 5, alpha = 3, gamma_hat = 8.4, beta_M = 1.8:
+  # leaving the empty site out makes beta_M too low.
+  expect_equal(open$n_sites, 6)
+  expect_equal(open$alpha, 2.5)
+  expect_equal(open$gamma_hat, 8.5)
+  expect_equal(open$beta_M, 2.4)
+})
+
+test_that("all_sites table errors: missing columns, conflicting groups", {
+  records <- data.frame(site = c("s1", "s2"), species = "sp1",
+                        habitat = c("tree", "open"))
+  expect_error(
+    as_site_by_species(records, site = "site", species = "species",
+                       group = "habitat",
+                       all_sites = data.frame(trap = c("s1", "s2"))),
+    "needs a column named 'site'"
+  )
+  expect_error(
+    as_site_by_species(records, site = "site", species = "species",
+                       group = "habitat",
+                       all_sites = data.frame(site = c("s1", "s2"))),
+    "named 'habitat'"
+  )
+  expect_error(
+    as_site_by_species(records, site = "site", species = "species",
+                       group = "habitat",
+                       all_sites = data.frame(site = c("s1", "s2"),
+                                              habitat = c("open", "open"))),
+    "s1 \\(records: tree vs all_sites: open\\)"
+  )
+  expect_error(
+    as_site_by_species(records, site = "site", species = "species",
+                       group = "habitat",
+                       all_sites = data.frame(site = c("s1", "s1", "s2"),
+                                              habitat = c("tree", "open", "open"))),
+    "more than one 'habitat'"
+  )
+})
+
+test_that("all_sites table without group just supplies the site list", {
+  records <- data.frame(site = "s1", species = "sp1")
+  res <- as_site_by_species(records, site = "site", species = "species",
+                            all_sites = data.frame(site = c("s1", "s2")))
+  expect_equal(rownames(res$x), c("s1", "s2"))
+})
+
+test_that("a blank habitat cell in a CSV becomes NA (not a group named \"\"), with a warning naming the site", {
+  records <- read.csv(text = "site,species,habitat\ns1,sp1,tree\ns2,sp2,\ns3,sp1,open\n")
+  expect_warning(
+    res <- as_site_by_species(records, site = "site", species = "species",
+                              group = "habitat", all_sites = c("s1", "s2", "s3")),
+    "label: s2"
+  )
+  expect_equal(res$group, c("tree", NA, "open"))
+})
+
+test_that("a blank label on one row doesn't conflict with the site's label on another row", {
+  records <- read.csv(text = "site,species,habitat\ns1,sp1,tree\ns1,sp2,\n")
+  res <- as_site_by_species(records, site = "site", species = "species",
+                            group = "habitat", all_sites = "s1")
+  expect_equal(res$group, "tree")
+})
+
+test_that("the no-all_sites warning says missing empty sites make beta too low", {
+  records <- data.frame(site = "s1", species = "sp1")
+  expect_warning(as_site_by_species(records, site = "site", species = "species"),
+                 "too low")
 })

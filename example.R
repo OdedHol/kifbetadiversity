@@ -60,8 +60,6 @@ if (requireNamespace("vegan", quietly = TRUE)) {
 ## ---- Sanity checks on CI ordering ----
 stopifnot(summary_tbl$beta_M_lwr <= summary_tbl$beta_M,
           summary_tbl$beta_M <= summary_tbl$beta_M_upr)
-stopifnot(summary_tbl$beta_A_lwr <= summary_tbl$beta_A,
-          summary_tbl$beta_A <= summary_tbl$beta_A_upr)
 stopifnot(summary_tbl$gamma_hat >= summary_tbl$gamma_obs)
 cat("Sanity checks passed: gamma_hat >= gamma_obs, CIs bracket the point estimates\n")
 
