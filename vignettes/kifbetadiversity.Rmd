@@ -1,8 +1,8 @@
 ---
-title: "betadiversity"
+title: "Getting started with kifbetadiversity"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{betadiversity}
+  %\VignetteIndexEntry{Getting started with kifbetadiversity}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
@@ -18,130 +18,219 @@ knitr::opts_chunk$set(
 library(kifbetadiversity)
 ```
 
-## Why not just count species?
+## The question
 
-The simplest way to compare how much species composition varies across
-sites is to compare observed richness (gamma, the total number of species
-seen) to average per-site richness (alpha). But observed gamma is a biased
-estimate of the *true* regional species pool: with a finite number of sites,
-some rare species are always missed entirely. That bias shrinks as you
-survey more sites, which means naively comparing beta diversity (some
-function of gamma and alpha) between two site-sets of different sizes,
-or with different numbers of rare species, can be misleading even when the
-underlying communities are identical.
+You sampled sites in two habitats and want to know which habitat is more
+**heterogeneous**: where species composition changes more from one site to
+the next. The sites in one habitat may look more alike than those in the
+other, but is that difference real, or just sampling noise?
 
-Kiflawi & Spencer (2004) address this by estimating gamma with a
-**first-order jackknife estimator** (Heltshe & Forrester 1983) instead of
-using the raw observed count, and by deriving analytical standard errors for
-that estimator and for the two beta diversity measures built on top of it.
-That's what this package implements: `beta_diversity()` computes the
-jackknife-corrected gamma, alpha, both beta diversity measures, and their
-confidence intervals in one call; `beta_diversity_test()` compares two
-independent site-sets.
+Beta diversity measures that heterogeneity. This package estimates it with a
+confidence interval and tests whether two habitats differ, following
 
-## The jackknife gamma estimate (Eqs. 6a-6b)
+> Kiflawi, M., & Spencer, M. (2004). Confidence intervals and hypothesis
+> testing for beta diversity. *Ecology*, 85(10), 2895-2900.
 
-For $N$ sites, let $u$ be the number of "unique" species -- species detected
-at exactly one site. The jackknife estimate of true gamma diversity is
+## Why Whittaker's beta needs help
 
-$$\hat\gamma = S_{obs} + u \cdot \frac{N - 1}{N}$$
+Whittaker's multiplicative beta diversity compares regional richness
+(**gamma**, all species in the habitat) with average local richness
+(**alpha**, species per site):
 
-where $S_{obs}$ is the observed number of species. Intuitively: each unique
-species is treated as a signal that more undetected rare species exist, and
-the correction term estimates how many. The standard error of $\hat\gamma$
-(Eq. 6b) accounts for how many sites each unique species' occurrence pattern
-touches, and is what ultimately propagates into the confidence intervals on
-`beta_M` and `beta_A` below.
+$$\beta_M = \frac{\gamma}{\bar\alpha} - 1$$
 
-`beta_diversity()`'s `gamma_hat` column is numerically identical to
-`vegan::specpool()`'s `jack1` -- both implement the same point estimate. The
-standard errors differ: this package follows Kiflawi & Spencer's Eq. 6b
-derivation, while `vegan` uses a different one (Smith & van Belle 1984).
+It is 0 when every site has every species, and grows as sites share fewer
+species. It can be read as the odds that a species of average commonness is
+*absent* from a randomly chosen site.
 
-## Two ways to measure beta diversity
+Used naively, with gamma as the number of species observed, it has two
+problems:
 
-Given (jackknife-corrected) gamma and (observed) alpha, this package reports
-two classic beta diversity measures:
+1. **No uncertainty for gamma.** One number per habitat can't tell you
+   whether two habitats truly differ.
+2. **Incomplete sampling.** However many sites you survey, rare species are
+   missed, so observed gamma undercounts the true species pool and keeps
+   rising as you add sites. With observed gamma, beta_M can't exceed N - 1,
+   so its value depends partly on how many sites you sampled.
 
-- **`beta_M`** -- Whittaker's multiplicative measure, $\hat\gamma / \alpha - 1$.
-  Interpretable as "how many times over is the regional pool of alpha-sized
-  site communities."
-- **`beta_A`** -- Lande's additive measure, $\hat\gamma - \alpha$. Interpretable
-  directly in units of species: how many species, on average, distinguish
-  one site's community from the region as a whole.
+Kiflawi & Spencer address both. They estimate gamma with the first-order
+jackknife and derive standard errors for it and for beta_M, which give a
+confidence interval and a two-sample test.
 
-Both come with analytical 95% confidence intervals by default (`conf` is
-adjustable): `beta_M`'s interval is built via the delta method on
-$\ln(\beta_M)$ (Eq. 7), and `beta_A`'s via direct error propagation from
-`se_gamma_hat` and `se_alpha`.
+## Estimating gamma: the jackknife (Eqs. 6a-6b)
 
-## From raw field records to a beta diversity estimate
+For $N$ sites, let $u$ be the number of **unique** species, those found at
+exactly one site. Many unique species suggest many more were missed
+entirely. The first-order jackknife estimate of gamma is
 
-Field data is rarely already a sites x species matrix -- it usually starts
-as one row per observation, with a site ID, a species ID, and maybe a
-detection value and a habitat label. `as_site_by_species()` reshapes that
-raw form into what `beta_diversity()` expects.
+$$\hat\gamma = \gamma_{obs} + u \cdot \frac{N - 1}{N}$$
 
-```{r pipeline}
-records <- data.frame(
-  site    = c("site1", "site1", "site1", "site2", "site2",
-              "site3", "site3", "site3", "site4", "site4"),
-  species = c("sp1", "sp2", "sp4", "sp1", "sp2",
-              "sp2", "sp3", "sp5", "sp1", "sp3"),
-  habitat = c("tree", "tree", "tree", "tree", "tree",
-              "open", "open", "open", "open", "open")
-)
+and Eq. 6b gives its standard error from how the unique species are spread
+across sites. The jackknife *reduces* the effect of sampling effort but
+does not remove it: with more sites, $\hat\gamma$ still tends to rise. Compare
+habitats sampled with similar effort (see [Assumptions and
+limitations](#assumptions-and-limitations)).
 
+## The confidence interval for beta_M (Eq. 7)
+
+The uncertainty in both $\hat\gamma$ and $\bar\alpha$ is combined with the
+delta method into a standard error for $\ln\beta_M$. The interval is built on
+the log scale and transformed back, so it is not symmetric around beta_M
+and never goes below 0.
+
+## From a field CSV to results
+
+Field data usually comes as one row per record: where, what, and perhaps a
+count and a habitat. The package ships a small **made-up** survey of 30 open
+and 30 tree sites to practise with:
+
+```{r read}
+records <- read.csv(system.file("extdata", "example_survey.csv",
+                                package = "kifbetadiversity"))
+head(records)
+```
+
+### Sites where nothing was found
+
+A site that was surveyed but where nothing was found has **no rows** in a
+record table like this one, so it would silently disappear. That matters:
+an empty site lowers alpha, so leaving it out makes beta diversity look
+**too low**. Give the package the full list of surveyed sites with
+`all_sites`. A table with a habitat column also tells it which habitat each
+empty site belongs to:
+
+```{r sites}
+sites <- read.csv(system.file("extdata", "example_sites.csv",
+                              package = "kifbetadiversity"))
+head(sites)
+```
+
+### Reshape
+
+`as_site_by_species()` turns the records into a sites x species table of 1s
+(found) and 0s (not found). Here `count` is the `value` column, and any count
+above 0 means present:
+
+```{r reshape}
 res <- as_site_by_species(records, site = "site", species = "species",
-                           group = "habitat", all_sites = paste0("site", 1:4))
-res$x
+                          value = "count", group = "habitat",
+                          all_sites = sites)
+dim(res$x)
+res$x[1:4, 1:8]
+table(res$group)
 ```
 
-Every row in `records` is treated as a detection (no `value` column was
-supplied). `all_sites` matters here: without it, a site that was surveyed
-but had nothing detected would be silently absent from the matrix rather
-than appearing as an all-zero row, which would understate `N` and bias the
-estimates. `as_site_by_species()` also returns a `group` vector aligned to
-the matrix rows, ready to pass straight through to `beta_diversity()`.
+`res$x` has 60 sites, including the two empty ones (`open_30` and
+`tree_30`).
 
-```{r pipeline-estimate}
-beta_diversity(res$x, group = res$group)
+### Estimate beta_M per habitat
+
+```{r estimate}
+est <- beta_diversity(res$x, group = res$group)
+est
 ```
 
-## Comparing groups within one call
-
-Passing `group` to `beta_diversity()` splits sites by group and computes
-every quantity separately per group, returning one row per group -- useful
-for, e.g., comparing beta diversity across habitat types surveyed together.
-The example above already did this via `res$group`; the same works with any
-grouping vector the same length as `nrow(x)`:
-
-```{r grouping}
-set.seed(1)
-x <- matrix(rbinom(20 * 10, 1, 0.35), nrow = 20,
-            dimnames = list(paste0("site", 1:20), paste0("sp", 1:10)))
-treatment <- rep(c("control", "npk"), each = 10)
-beta_diversity(x, group = treatment)
-```
-
-## Testing whether two site-sets differ
-
-`beta_diversity()` on a grouped matrix reports per-group estimates but
-doesn't test whether they differ. For a formal two-sample comparison, use
-`beta_diversity_test()`, which combines the standard errors from two
-independent calls to `beta_diversity()` into a Z-test on both `beta_M` and
-`beta_A` (Eqs. 10a-10b):
+### Test whether the habitats differ (Eq. 10a)
 
 ```{r test}
-set.seed(1)
-x1 <- matrix(rbinom(8 * 10, 1, 0.35), nrow = 8)
-x2 <- matrix(rbinom(8 * 10, 1, 0.55), nrow = 8)
-beta_diversity_test(x1, x2)
+beta_diversity_test(res$x, group = res$group)
 ```
 
-`Z_beta_M` and `Z_beta_A` are standard Z-statistics; `p_beta_M`/`p_beta_A`
-are two-tailed p-values testing $H_0: \beta_{M,1} = \beta_{M,2}$ (respectively
-$\beta_A$) against a two-sided alternative.
+$Z = \ln(\beta_{M,1}/\beta_{M,2}) / \sqrt{Var[\ln\beta_{M,1}] + Var[\ln\beta_{M,2}]}$.
+A negative Z means the first group (`open`) has the lower beta_M. Here the
+tree sites are clearly more heterogeneous than the open sites.
+
+If your two habitats are already in two separate tables, use
+`beta_diversity_test(x, y)` instead.
+
+### What leaving out empty sites would have done
+
+```{r no-all-sites}
+res_no_empty <- suppressWarnings(
+  as_site_by_species(records, site = "site", species = "species",
+                     group = "habitat")
+)
+beta_diversity(res_no_empty$x, group = res_no_empty$group)[,
+  c("group", "n_sites", "alpha", "beta_M")]
+```
+
+Without `all_sites`, each habitat loses its empty site and beta_M drops in
+both, so it is too low.
+
+## What each output column means
+
+| Column | Meaning |
+|---|---|
+| `group` | Habitat or group label (`"All"` if ungrouped; `NA` for sites with no label). |
+| `n_sites` | Number of sites, N. |
+| `gamma_obs` | Species observed across all sites. |
+| `gamma_hat` | Jackknife estimate of the true number of species (Eq. 6a). |
+| `se_gamma_hat` | Standard error of `gamma_hat` (Eq. 6b). |
+| `alpha` | Average number of species per site. |
+| `se_alpha` | Standard error of `alpha` (Eq. 8b). |
+| `beta_M` | Whittaker's beta, `gamma_hat / alpha - 1`. |
+| `se_ln_beta_M` | Standard error of `log(beta_M)` (Eq. 7). |
+| `beta_M_lwr`, `beta_M_upr` | Confidence interval for `beta_M` (95% by default; change it with `conf`). |
+
+`beta_diversity_test()` returns the two group labels, both beta_M values,
+`Z_beta_M` and a two-tailed `p_beta_M`.
+
+## Assumptions and limitations
+
+- **Independent, randomly sampled sites.** The standard errors treat every
+  site as an independent random sample from its habitat. Spatially clumped
+  designs (several traps under the same tree), paired designs (a tree trap
+  and an open trap at the same location) and block designs hold less
+  independent information than their number of sites suggests. Standard
+  errors are then too small and Z too large, so a "significant" result may
+  not be. Consider a coarser, more independent unit, such as pooling the
+  traps of one tree into one site.
+- **The two samples must be independent of each other.**
+- **Comparable sampling effort.** The jackknife reduces but does not remove
+  the effect of sampling effort, and the largest possible beta_M grows with
+  the number of sites. Compare habitats with a similar number of sites and
+  similar effort per site.
+- **Enough sites.** In the paper's simulations the beta_M interval was
+  reasonably reliable from about 30 sites, and could be poor with 10. The
+  package warns below 10 sites.
+- **Include empty sites** with `all_sites` (see above).
+- **Presence/absence only.** Counts are turned into present (above 0) or
+  absent. Abundances are not used.
+
+## Why results differ from vegan
+
+`gamma_hat` equals `vegan::specpool()`'s `jack1`. Its standard error does
+not equal `jack1.se`: this package follows the paper's Eq. 6b, while
+`vegan` uses a different derivation (Smith & van Belle 1984). Z values
+computed with `jack1.se` will therefore differ slightly from
+`beta_diversity_test()`.
+
+## Common errors
+
+**A wide table read without row names.** If your CSV is already a sites x
+species table with site names in the first column, read it with
+`row.names = 1`, or the site names become a text column:
+
+```{r wide-error, error = TRUE}
+csv <- "site,sp1,sp2,sp3\ns1,1,0,1\ns2,0,1,1\ns3,1,1,0"
+beta_diversity(read.csv(text = csv))
+```
+
+**Records with no species name.** The package can't guess which species a
+record is, so it stops and gives the row numbers to fix or remove:
+
+```{r species-error, error = TRUE}
+bad <- data.frame(site = c("s1", "s1"), species = c("sp1", ""))
+as_site_by_species(bad, site = "site", species = "species", all_sites = "s1")
+```
+
+**Sites with no habitat label** are not dropped silently. They are reported
+as their own `NA` group with a warning naming them, so you can fix the
+labels.
+
+**No turnover.** If every site has exactly the same species, beta_M is 0 and
+has no confidence interval, so the package stops (or, in a grouped run,
+skips that group with a warning).
 
 ## References
 
@@ -150,3 +239,6 @@ testing for beta diversity. *Ecology*, 85(10), 2895-2900.
 
 Heltshe, J. F., & Forrester, N. E. (1983). Estimating species richness using
 the jackknife procedure. *Biometrics*, 39(1), 1-11.
+
+Smith, E. P., & van Belle, G. (1984). Nonparametric estimation of species
+richness. *Biometrics*, 40(1), 119-129.
