@@ -323,7 +323,8 @@ as_site_by_species <- function(x, site, species, value = NULL,
   missing_cols <- setdiff(needed, names(x))
   if (length(missing_cols) > 0) {
     stop("Column(s) not found in `x`: ", paste(missing_cols, collapse = ", "),
-         ". Available columns: ", paste(names(x), collapse = ", "))
+         ". Available columns: ", .list_sites(names(x), max_show = 20),
+         .wide_shape_hint(x))
   }
 
   site_ids <- trimws(as.character(x[[site]]))
@@ -372,6 +373,204 @@ as_site_by_species <- function(x, site, species, value = NULL,
 
   group_vec <- .resolve_group(x, group, site_ids, rownames(mat),
                               parsed$groups)
+
+  list(x = mat, group = group_vec)
+}
+
+#' Hint for a one-row-per-site table passed where records were expected
+#' (internal)
+#' @noRd
+.wide_shape_hint <- function(x) {
+  is_num <- vapply(x, function(col) is.numeric(col) || is.logical(col),
+                   logical(1))
+  if (sum(is_num) < 5) {
+    return("")
+  }
+  small <- vapply(x[is_num], function(col) {
+    v <- col[!is.na(col)]
+    length(v) == 0 || all(v >= 0 & v == round(v))
+  }, logical(1))
+  if (mean(small) < 0.8) {
+    return("")
+  }
+  paste0(". Your table looks like one row per site with species as ",
+         "columns. For that shape, use as_site_table(x, site = ..., ",
+         "species = ...) instead of as_site_by_species().")
+}
+
+#' Resolve the species argument of as_site_table() to column names (internal)
+#' @noRd
+.resolve_species_cols <- function(x, species, site, group) {
+  cols <- names(x)
+  not_found <- function(bad) {
+    stop("Species column(s) not found in `x`: ", paste(bad, collapse = ", "),
+         ". Available columns: ", .list_sites(cols, max_show = 20))
+  }
+
+  if (is.null(species)) {
+    chosen <- setdiff(cols, c(site, group))
+  } else if (is.numeric(species)) {
+    if (any(is.na(species)) || any(species < 1 | species > length(cols)) ||
+        any(species != round(species))) {
+      stop("`species` positions must be whole numbers between 1 and ",
+           length(cols), " (the number of columns in x)")
+    }
+    chosen <- cols[species]
+  } else if (is.character(species) && length(species) == 1 &&
+             grepl(":", species, fixed = TRUE) && !species %in% cols) {
+    ends <- trimws(strsplit(species, ":", fixed = TRUE)[[1]])
+    if (length(ends) != 2) {
+      stop("`species` as a range must look like \"first:last\", e.g. ",
+           "\"", cols[min(2, length(cols))], ":", cols[length(cols)], "\"")
+    }
+    missing_ends <- setdiff(ends, cols)
+    if (length(missing_ends) > 0) not_found(missing_ends)
+    from <- match(ends[1], cols)
+    to <- match(ends[2], cols)
+    if (from > to) {
+      stop("In `species = \"", species, "\"`, '", ends[1], "' comes after '",
+           ends[2], "' in the table. Give the range in the order the ",
+           "columns appear: \"", ends[2], ":", ends[1], "\"")
+    }
+    chosen <- cols[from:to]
+  } else if (is.character(species)) {
+    missing_sp <- setdiff(species, cols)
+    if (length(missing_sp) > 0) not_found(missing_sp)
+    chosen <- species
+  } else {
+    stop("`species` must be column names, column positions (e.g. 7:121), ",
+         "or a range like \"first:last\"")
+  }
+
+  clash <- intersect(chosen, c(site, group))
+  if (length(clash) > 0) {
+    if (is.null(species)) {
+      chosen <- setdiff(chosen, clash)
+    } else {
+      stop("`species` includes the ", if (identical(clash[1], site)) "site"
+           else "group", " column '", clash[1], "'. Choose only the ",
+           "columns that are species.")
+    }
+  }
+  if (length(chosen) == 0) {
+    stop("No species columns selected")
+  }
+
+  is_text <- !vapply(x[chosen], function(col) is.numeric(col) || is.logical(col),
+                     logical(1))
+  if (any(is_text)) {
+    stop("Column(s) ", paste0("'", chosen[is_text], "'", collapse = ", "),
+         " contain text, so they can't be species columns (species columns ",
+         "hold 0/1, TRUE/FALSE or counts). Use `species = ` to choose only ",
+         "the species columns, e.g. species = \"", chosen[!is_text][1],
+         ":", chosen[!is_text][sum(!is_text)], "\" or by position.")
+  }
+  chosen
+}
+
+#' Prepare a table with one row per site and species as columns
+#'
+#' `r lifecycle::badge("experimental")`
+#'
+#' The twin of \code{\link{as_site_by_species}}, for data that is already
+#' one row per site, with one column per species (presence/absence or
+#' counts) and usually some extra columns such as a site ID, a habitat, or a
+#' richness total. It picks out the species columns, names each row by its
+#' site, and returns the same \code{list(x, group)} as
+#' \code{as_site_by_species()}, ready for \code{\link{beta_diversity}} and
+#' \code{\link{beta_diversity_test}}.
+#'
+#' Every species column counts as a species, so leave out anything that
+#' isn't one (IDs, dates, richness or abundance totals). If a selected
+#' column looks like it isn't a species, you get a warning naming it.
+#'
+#' A site where nothing was found is simply a row of zeros in this shape, so
+#' it is already included: there is no \code{all_sites} argument.
+#'
+#' @param x A data frame with one row per site (e.g. from \code{read.csv()}).
+#' @param site Name of the column that names each site. Every row must have
+#'   a different, non-blank value. If your site names repeat (e.g. the same
+#'   tree number appears under two habitats), use or make a column that is
+#'   unique per row.
+#' @param species Which columns are species: column names, column positions
+#'   (e.g. \code{7:121}), or a range written as \code{"first:last"} (e.g.
+#'   \code{"aran_1:zod_j"}, every column from \code{aran_1} to \code{zod_j}
+#'   in the order they appear). Defaults to \code{NULL}: every column except
+#'   \code{site} and \code{group}, which only works if the table has no
+#'   other extra columns.
+#' @param group Optional name of a column giving each site's habitat or
+#'   treatment. Blank labels count as missing (\code{NA}), with a warning.
+#'
+#' @return A list with \code{x}, a numeric sites x species matrix with the
+#'   site names as row names, and \code{group}, the per-site labels aligned
+#'   to its rows (\code{NULL} if \code{group} was not given).
+#'
+#' @examples
+#' path <- system.file("extdata", "example_site_table.csv",
+#'                     package = "kifbetadiversity")
+#' tab <- read.csv(path)
+#' tab[1:3, 1:8]
+#'
+#' res <- as_site_table(tab, site = "site_id", group = "habitat",
+#'                      species = "sp01:sp45")
+#' beta_diversity(res$x, group = res$group)
+#'
+#' @family beta diversity functions
+#' @export
+as_site_table <- function(x, site, species = NULL, group = NULL) {
+  if (!is.data.frame(x)) {
+    stop("as_site_table() needs a data frame with one row per site ",
+         "(e.g. from read.csv()), but got a ", class(x)[1], ". A matrix of ",
+         "species can go straight into beta_diversity().")
+  }
+  if (nrow(x) == 0) {
+    stop("Your data table is empty (0 rows)")
+  }
+  .check_col_arg(site, "site")
+  .check_col_arg(group, "group")
+  missing_cols <- setdiff(c(site, group), names(x))
+  if (length(missing_cols) > 0) {
+    stop("Column(s) not found in `x`: ", paste(missing_cols, collapse = ", "),
+         ". Available columns: ", .list_sites(names(x), max_show = 20))
+  }
+
+  site_ids <- trimws(as.character(x[[site]]))
+  no_site <- which(is.na(site_ids) | site_ids == "")
+  if (length(no_site) > 0) {
+    stop(length(no_site), " row(s) have a blank or missing site name in the '",
+         site, "' column (row(s) ", .list_sites(no_site), "). Every row ",
+         "needs a site name: fix or remove these rows.")
+  }
+  dup <- unique(site_ids[duplicated(site_ids)])
+  if (length(dup) > 0) {
+    detail <- vapply(utils::head(dup, 5), function(d) {
+      paste0("'", d, "' (rows ", paste(which(site_ids == d), collapse = ", "), ")")
+    }, character(1))
+    stop("Each row must be one site, but the '", site, "' column repeats ",
+         "site names: ", paste(detail, collapse = "; "),
+         if (length(dup) > 5) paste0(", and ", length(dup) - 5, " more"),
+         ". If names repeat across habitats (e.g. a tree or plot number), ",
+         "use a column that is unique per row, such as one combining the ",
+         "number and the habitat.")
+  }
+  .warn_case_collisions(site_ids, "site")
+
+  sp_cols <- .resolve_species_cols(x, species, site, group)
+  mat <- as.matrix(x[sp_cols])
+  storage.mode(mat) <- "double"
+  dimnames(mat) <- list(site_ids, sp_cols)
+  .check_species_columns(mat)
+
+  group_vec <- NULL
+  if (!is.null(group)) {
+    group_vec <- .clean_group(x[[group]])
+    if (anyNA(group_vec)) {
+      warning(sum(is.na(group_vec)), " site(s) have a blank or missing '",
+              group, "' label: ", .list_sites(site_ids[is.na(group_vec)]),
+              ". Their group is NA, and beta_diversity() will report them as ",
+              "a separate NA group. Fix the labels in your data.")
+    }
+  }
 
   list(x = mat, group = group_vec)
 }

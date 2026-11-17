@@ -140,7 +140,12 @@
     beta_M = beta_M,
     se_ln_beta_M = se_ln_beta_M,
     beta_M_lwr = beta_M_ci[1],
-    beta_M_upr = beta_M_ci[2]
+    beta_M_upr = beta_M_ci[2],
+    # Conventional Whittaker beta, gamma / alpha = beta_M + 1. Same
+    # information as beta_M; its interval is the beta_M interval shifted by 1.
+    beta_W = beta_M + 1,
+    beta_W_lwr = beta_M_ci[1] + 1,
+    beta_W_upr = beta_M_ci[2] + 1
   )
 }
 
@@ -163,6 +168,76 @@
   invisible(NULL)
 }
 
+#' Warn about columns that probably aren't species (internal)
+#'
+#' Flags columns whose name looks like an ID / summary / date column, whose
+#' values equal the number (or total) of the other species at each site
+#' (a richness or abundance column), or whose values are far out of scale
+#' in an otherwise presence/absence table. Warns once, never errors.
+#' @noRd
+.check_species_columns <- function(m) {
+  m <- as.matrix(m)
+  p <- ncol(m)
+  if (p < 2 || !(is.numeric(m) || is.logical(m))) {
+    return(invisible(NULL))
+  }
+  storage.mode(m) <- "double"
+  m[is.na(m)] <- 0
+  labels <- colnames(m)
+  if (is.null(labels)) labels <- paste0("column ", seq_len(p))
+  reasons <- vector("list", p)
+
+  if (!is.null(colnames(m))) {
+    name_hit <- grepl(paste0("richness|abundance|total|^n_|_id$|^id$|num$|",
+                             "^year|^date|^lat|^lon|^plot|^site"),
+                      colnames(m), ignore.case = TRUE)
+    for (j in which(name_hit)) {
+      reasons[[j]] <- c(reasons[[j]], "its name looks like an ID, number or summary column")
+    }
+  }
+
+  if (p >= 5) {
+    present <- m > 0
+    n_present <- rowSums(present)
+    total <- rowSums(m)
+    for (j in seq_len(p)) {
+      col <- m[, j]
+      if (max(col) <= 1) next
+      if (all(col == n_present - present[, j])) {
+        reasons[[j]] <- c(reasons[[j]], "it equals the number of other species at each site (a richness column?)")
+      } else if (all(col == total - col)) {
+        reasons[[j]] <- c(reasons[[j]], "it equals the total of the other columns at each site (an abundance column?)")
+      }
+    }
+
+    is01 <- apply(m, 2, function(col) all(col %in% c(0, 1)))
+    if (mean(is01) >= 0.9 && any(!is01)) {
+      maxes <- apply(m, 2, max)
+      for (j in which(!is01)) {
+        if (maxes[j] >= 10 * max(1, stats::median(maxes[-j]))) {
+          reasons[[j]] <- c(reasons[[j]], paste0(
+            "its values go up to ", maxes[j], " while almost every other ",
+            "column is 0/1"))
+        }
+      }
+    }
+  }
+
+  flagged <- which(lengths(reasons) > 0)
+  if (length(flagged) > 0) {
+    detail <- vapply(flagged, function(j) {
+      paste0("'", labels[j], "' (", paste(unique(reasons[[j]]), collapse = "; "), ")")
+    }, character(1))
+    warning("These columns are being treated as species, but may not be ",
+            "species: ", paste(detail, collapse = ", "), ". Every column of ",
+            "x counts as a species, so a column like this changes the ",
+            "results. If they aren't species, leave them out, e.g. with ",
+            "as_site_table(..., species = ) or by removing them from x.",
+            call. = FALSE)
+  }
+  invisible(NULL)
+}
+
 #' Coerce x to a matrix, explaining text columns in a data frame (internal)
 #' @noRd
 .as_site_matrix <- function(x) {
@@ -171,13 +246,28 @@
                        logical(1))
     if (any(is_text)) {
       text_cols <- names(x)[is_text]
+      # Guess which text column holds site names (all different) and which
+      # holds a habitat (few different values), to show a concrete fix.
+      n_distinct <- vapply(x[text_cols], function(col) length(unique(col)),
+                           integer(1))
+      site_guess <- text_cols[n_distinct == nrow(x)][1]
+      group_guess <- text_cols[n_distinct <= 5][1]
+      hint <- if (!is.na(site_guess)) {
+        paste0(" It looks like a table with one row per site, so prepare it ",
+               "with as_site_table(), for example (a guess -- check the ",
+               "column names): res <- as_site_table(x, site = \"", site_guess,
+               "\"", if (!is.na(group_guess)) paste0(", group = \"", group_guess, "\""),
+               ", species = <your species columns>), then ",
+               "beta_diversity(res$x, group = res$group).")
+      } else {
+        ""
+      }
       stop("x must contain only numbers or TRUE/FALSE values, but column(s) ",
-           paste0("'", text_cols, "'", collapse = ", "), " contain text. ",
-           "If that is a column of site names (common when a wide table is ",
-           "read with read.csv()), make it the row names instead, e.g. ",
-           "read.csv(\"file.csv\", row.names = 1). If your data is one row ",
-           "per record (site, species, ...), reshape it first with ",
-           "as_site_by_species().")
+           paste0("'", text_cols, "'", collapse = ", "), " contain text.",
+           hint, " If your site names are the first column of a CSV, you can ",
+           "also read it with read.csv(\"file.csv\", row.names = 1). If your ",
+           "data is one row per record (site, species, ...), use ",
+           "as_site_by_species() instead.")
     }
   }
   as.matrix(x)
@@ -211,7 +301,10 @@
 #'   supplied directly. \code{NA} values are treated as absence (with a
 #'   warning). Errors if \code{x} contains text (naming the column), negative
 #'   or non-finite values, or has fewer than 2 sites or 1 species. Warns if
-#'   there are fewer than 10 sites.
+#'   there are fewer than 10 sites, or if some columns look like they aren't
+#'   species (e.g. a richness, ID or total column). Every column counts as a
+#'   species, so prepare a table that has extra columns with
+#'   \code{\link{as_site_table}}.
 #' @param group Optional vector of length \code{nrow(x)} assigning each site
 #'   to a group (e.g. habitat or treatment); results are then computed
 #'   separately per group. Defaults to \code{NULL}, treating all sites as a
@@ -245,6 +338,11 @@
 #'     \item{beta_M_lwr, beta_M_upr}{Confidence interval for \code{beta_M}.
 #'       It is built on the log scale, so it is not symmetric around
 #'       \code{beta_M}.}
+#'     \item{beta_W, beta_W_lwr, beta_W_upr}{Conventional Whittaker beta,
+#'       \code{gamma_hat / alpha} (= \code{beta_M + 1}), and its interval
+#'       (the \code{beta_M} interval + 1). Same information as
+#'       \code{beta_M}; reported for comparison with studies that use
+#'       gamma / alpha.}
 #'   }
 #'   beta_M can't be estimated, and an error is raised (or the group is
 #'   skipped, in a grouped call), when every site has exactly the same
@@ -265,8 +363,15 @@
 #' @family beta diversity functions
 #' @export
 beta_diversity <- function(x, group = NULL, conf = 0.95) {
+  .beta_diversity(x, group = group, conf = conf, check_columns = TRUE)
+}
+
+#' beta_diversity() body, with the column check optional (internal)
+#' @noRd
+.beta_diversity <- function(x, group = NULL, conf = 0.95, check_columns = TRUE) {
   .check_conf(conf)
   x <- .as_site_matrix(x)
+  if (check_columns) .check_species_columns(x)
 
   if (is.null(group)) {
     result <- .beta_diversity_one(x, conf)
@@ -438,8 +543,11 @@ beta_diversity_test <- function(x, y = NULL, conf = 0.95, group = NULL) {
            ". To compare two of them, subset your data first, e.g. ",
            "keep <- group %in% c(\"A\", \"B\").")
     }
-    s1 <- beta_diversity(x[group == labels[1], , drop = FALSE], conf = conf)
-    s2 <- beta_diversity(x[group == labels[2], , drop = FALSE], conf = conf)
+    .check_species_columns(x)
+    s1 <- .beta_diversity(x[group == labels[1], , drop = FALSE], conf = conf,
+                          check_columns = FALSE)
+    s2 <- .beta_diversity(x[group == labels[2], , drop = FALSE], conf = conf,
+                          check_columns = FALSE)
   }
 
   # Eq. 10a

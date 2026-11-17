@@ -454,3 +454,128 @@ test_that("the no-all_sites warning says missing empty sites make beta too low",
   expect_warning(as_site_by_species(records, site = "site", species = "species"),
                  "too low")
 })
+
+## ---- as_site_table() ----
+
+# Shaped like a real field file: info columns first (a tree number that
+# repeats across habitats, a text column, a richness total), then counts.
+site_table_csv <- paste(
+  "treenum,habitat,Specie,site_id,richness,aran_1,gna_2,liny_1,zod_1",
+  "2,open,Ceratonia,2_open,2,0,1,0,3",
+  "2,tree,Ceratonia,2_tree,3,1,2,1,0",
+  "4,open,Ziziphus,4_open,0,0,0,0,0",
+  "4,tree,Ziziphus,4_tree,1,0,0,0,1",
+  sep = "\n")
+
+test_that("species by name, position and \"first:last\" range give the same matrix", {
+  tab <- read.csv(text = site_table_csv)
+  by_range <- as_site_table(tab, site = "site_id", group = "habitat",
+                            species = "aran_1:zod_1")
+  by_pos <- as_site_table(tab, site = "site_id", group = "habitat",
+                          species = 6:9)
+  by_name <- as_site_table(tab, site = "site_id", group = "habitat",
+                           species = c("aran_1", "gna_2", "liny_1", "zod_1"))
+  expect_equal(by_pos, by_range)
+  expect_equal(by_name, by_range)
+  expect_equal(rownames(by_range$x), tab$site_id)
+  expect_equal(colnames(by_range$x), c("aran_1", "gna_2", "liny_1", "zod_1"))
+  expect_equal(by_range$group, tab$habitat)
+  expect_equal(unname(by_range$x["2_open", ]), c(0, 1, 0, 3))
+  # a site where nothing was found is kept, as a row of zeros
+  expect_equal(unname(rowSums(by_range$x)["4_open"]), 0)
+})
+
+test_that("species = NULL uses every other column, and errors on text columns", {
+  tab <- read.csv(text = site_table_csv)
+  expect_error(as_site_table(tab, site = "site_id", group = "habitat"),
+               "'Specie' contain text")
+  num_only <- tab[c("site_id", "habitat", "aran_1", "gna_2", "liny_1", "zod_1")]
+  res <- as_site_table(num_only, site = "site_id", group = "habitat")
+  expect_equal(colnames(res$x), c("aran_1", "gna_2", "liny_1", "zod_1"))
+})
+
+test_that("info columns left in the species selection get a warning naming them", {
+  tab <- read.csv(text = site_table_csv)
+  expect_warning(
+    as_site_table(tab, site = "site_id", group = "habitat",
+                  species = c("treenum", "richness", "aran_1", "gna_2", "liny_1", "zod_1")),
+    "'treenum'.*'richness'"
+  )
+})
+
+test_that("a repeated site column (e.g. a tree number) errors, naming the value and rows", {
+  tab <- read.csv(text = site_table_csv)
+  expect_error(as_site_table(tab, site = "treenum", species = "aran_1:zod_1"),
+               "'2' \\(rows 1, 2\\)")
+  expect_error(as_site_table(tab, site = "treenum", species = "aran_1:zod_1"),
+               "unique per row")
+})
+
+test_that("blank site names error with row numbers", {
+  tab <- read.csv(text = site_table_csv)
+  tab$site_id[3] <- ""
+  expect_error(as_site_table(tab, site = "site_id", species = "aran_1:zod_1"),
+               "row\\(s\\) 3\\)")
+})
+
+test_that("bad species selections give specific errors", {
+  tab <- read.csv(text = site_table_csv)
+  expect_error(as_site_table(tab, site = "site_id", species = "aran_1:nope"),
+               "not found.*nope")
+  expect_error(as_site_table(tab, site = "site_id", species = "zod_1:aran_1"),
+               "comes after")
+  expect_error(as_site_table(tab, site = "site_id", species = c("aran_1", "site_id")),
+               "includes the site column")
+  expect_error(as_site_table(tab, site = "site_id", species = 99),
+               "between 1 and 9")
+})
+
+test_that("a blank group label becomes NA, with a warning naming the site", {
+  tab <- read.csv(text = site_table_csv)
+  tab$habitat[2] <- " "
+  expect_warning(
+    res <- as_site_table(tab, site = "site_id", group = "habitat",
+                         species = "aran_1:zod_1"),
+    "label: 2_tree"
+  )
+  expect_equal(res$group, c("open", NA, "open", "tree"))
+})
+
+test_that("non-data-frame input gets a clear message", {
+  expect_error(as_site_table(matrix(1, 2, 2), site = "s"), "needs a data frame")
+})
+
+test_that("the hand-verified open example gives the same beta in both shapes", {
+  # Same o1-o6 open sites as the all_sites test above, now one row per site.
+  tab <- read.csv(text = paste(
+    "site,habitat,a,b,c,d,e,f",
+    "o1,open,1,1,1,0,0,0", "o2,open,1,1,0,1,0,0", "o3,open,1,0,1,0,1,0",
+    "o4,open,0,1,1,0,0,1", "o5,open,1,1,1,0,0,0", "o6,open,0,0,0,0,0,0",
+    sep = "\n"))
+  res <- as_site_table(tab, site = "site", group = "habitat", species = "a:f")
+  out <- suppressWarnings(beta_diversity(res$x, group = res$group))
+  expect_equal(out$beta_M, 2.4)  # hand calculation in the all_sites test
+  expect_equal(out$beta_W, 3.4)
+})
+
+test_that("the two example CSVs (record shape and site shape) give identical results", {
+  records <- read.csv(system.file("extdata", "example_survey.csv",
+                                  package = "kifbetadiversity"))
+  sites <- read.csv(system.file("extdata", "example_sites.csv",
+                                package = "kifbetadiversity"))
+  tab <- read.csv(system.file("extdata", "example_site_table.csv",
+                              package = "kifbetadiversity"))
+  long <- as_site_by_species(records, site = "site", species = "species",
+                             value = "count", group = "habitat",
+                             all_sites = sites)
+  wide <- as_site_table(tab, site = "site_id", group = "habitat",
+                        species = "sp01:sp45")
+  expect_equal(beta_diversity(wide$x, group = wide$group),
+               beta_diversity(long$x, group = long$group))
+})
+
+test_that("as_site_by_species() on a one-row-per-site table points to as_site_table()", {
+  tab <- read.csv(text = site_table_csv)
+  expect_error(as_site_by_species(tab, site = "site_id", species = "species"),
+               "use as_site_table")
+})

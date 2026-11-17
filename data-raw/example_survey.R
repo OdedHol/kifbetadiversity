@@ -6,6 +6,13 @@
 # of patchier species (sites differ more). One site per habitat was
 # surveyed but nothing was found, so it appears only in example_sites.csv.
 #
+# The same survey is also written in the other common shape,
+# example_site_table.csv: one row per site, one column per species (counts),
+# plus info columns. plot_num repeats across habitats on purpose (like a
+# tree number shared by a tree site and an open site), so it can't be used
+# as the site name; richness is a summary column that must not be treated
+# as a species.
+#
 # Run from the package root: Rscript data-raw/example_survey.R
 
 set.seed(2004)
@@ -38,3 +45,17 @@ rownames(sites) <- NULL
 
 write.csv(records, "inst/extdata/example_survey.csv", row.names = FALSE)
 write.csv(sites, "inst/extdata/example_sites.csv", row.names = FALSE)
+
+# One row per site, species as columns
+site_table <- sites
+site_table$plot_num <- as.integer(sub(".*_", "", site_table$site))
+counts <- matrix(0L, nrow = nrow(sites), ncol = length(species),
+                 dimnames = list(sites$site, species))
+counts[cbind(records$site, records$species)] <- as.integer(records$count)
+site_table <- data.frame(plot_num = site_table$plot_num,
+                         habitat = site_table$habitat,
+                         site_id = site_table$site,
+                         richness = rowSums(counts > 0),
+                         counts, check.names = FALSE)
+rownames(site_table) <- NULL
+write.csv(site_table, "inst/extdata/example_site_table.csv", row.names = FALSE)

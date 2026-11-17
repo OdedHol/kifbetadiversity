@@ -380,7 +380,8 @@ test_that("beta_diversity() returns beta_M columns only (no beta_A)", {
   expect_equal(names(beta_diversity(x)),
                c("group", "n_sites", "gamma_obs", "gamma_hat", "se_gamma_hat",
                  "alpha", "se_alpha", "beta_M", "se_ln_beta_M",
-                 "beta_M_lwr", "beta_M_upr"))
+                 "beta_M_lwr", "beta_M_upr", "beta_W", "beta_W_lwr",
+                 "beta_W_upr"))
   expect_false(any(grepl("beta_A", names(beta_diversity_test(x, x)))))
 })
 
@@ -438,4 +439,76 @@ test_that("beta_diversity_test(group = ) leaves unlabelled sites out, with a war
                  "left out of the test: row 1, row 24")
   expected <- beta_diversity_test(x[2:12, ], x[13:23, ])
   expect_equal(res$Z_beta_M, expected$Z_beta_M)
+})
+
+test_that("beta_W is gamma_hat / alpha = beta_M + 1, with the beta_M interval shifted by 1", {
+  set.seed(3)
+  x <- matrix(rbinom(20 * 12, 1, 0.3), nrow = 20)
+  r <- beta_diversity(x)
+  expect_equal(r$beta_W, r$gamma_hat / r$alpha)
+  expect_equal(r$beta_W, r$beta_M + 1)
+  expect_equal(c(r$beta_W_lwr, r$beta_W_upr), c(r$beta_M_lwr, r$beta_M_upr) + 1)
+})
+
+## ---- columns that probably aren't species ----
+
+test_that("info columns like the user's file (richness, treenum, total) are flagged by name", {
+  set.seed(4)
+  sp <- matrix(rbinom(20 * 8, 1, 0.3), nrow = 20,
+               dimnames = list(NULL, paste0("sp", 1:8)))
+  x <- cbind(treenum = 1:20, richness = rowSums(sp),
+             total_adult_abundance = rowSums(sp) * 2, sp)
+  expect_warning(beta_diversity(x), "'treenum'.*'richness'.*'total_adult_abundance'")
+})
+
+test_that("a row-sum column with an innocent name is flagged as richness-like", {
+  set.seed(5)
+  sp <- matrix(rbinom(20 * 8, 1, 0.4), nrow = 20,
+               dimnames = list(NULL, paste0("sp", 1:8)))
+  x <- cbind(sp, zz = rowSums(sp))
+  expect_warning(beta_diversity(x), "'zz' \\(it equals the number of other species")
+})
+
+test_that("an out-of-scale column in a 0/1 table is flagged", {
+  set.seed(6)
+  sp <- matrix(rbinom(20 * 12, 1, 0.3), nrow = 20,
+               dimnames = list(NULL, paste0("sp", 1:12)))
+  x <- cbind(sp, q = sample(100:200, 20))
+  expect_warning(beta_diversity(x), "'q' \\(its values go up to")
+})
+
+test_that("plain 0/1 and plain abundance tables give no column warning", {
+  set.seed(7)
+  pa <- matrix(rbinom(20 * 12, 1, 0.3), nrow = 20,
+               dimnames = list(NULL, paste0("sp", 1:12)))
+  ab <- matrix(rpois(20 * 12, 1.5), nrow = 20,
+               dimnames = list(NULL, paste0("sp", 1:12)))
+  expect_no_warning(beta_diversity(pa))
+  expect_no_warning(beta_diversity(ab))
+  expect_no_warning(beta_diversity(unname(pa)))
+})
+
+test_that("beta_diversity_test(group = ) warns about suspicious columns once, not per group", {
+  set.seed(8)
+  sp <- matrix(rbinom(24 * 8, 1, 0.3), nrow = 24,
+               dimnames = list(NULL, paste0("sp", 1:8)))
+  x <- cbind(richness = rowSums(sp), sp)
+  n <- 0
+  withCallingHandlers(
+    beta_diversity_test(x, group = rep(c("a", "b"), each = 12)),
+    warning = function(w) {
+      if (grepl("may not be species", conditionMessage(w))) n <<- n + 1
+      invokeRestart("muffleWarning")
+    }
+  )
+  expect_equal(n, 1)
+})
+
+test_that("a wide data frame with text columns suggests as_site_table() with guessed columns", {
+  tab <- read.csv(text = paste(
+    "treenum,habitat,site_id,sp1,sp2,sp3",
+    "2,open,2_open,1,0,1", "2,tree,2_tree,0,1,1", "3,open,3_open,1,1,0",
+    sep = "\n"))
+  expect_error(beta_diversity(tab),
+               'as_site_table\\(x, site = "site_id", group = "habitat"')
 })

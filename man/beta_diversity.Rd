@@ -13,7 +13,10 @@ presence/absence (0/1, TRUE/FALSE) or raw abundance/count data may be
 supplied directly. \code{NA} values are treated as absence (with a
 warning). Errors if \code{x} contains text (naming the column), negative
 or non-finite values, or has fewer than 2 sites or 1 species. Warns if
-there are fewer than 10 sites.}
+there are fewer than 10 sites, or if some columns look like they aren't
+species (e.g. a richness, ID or total column). Every column counts as a
+species, so prepare a table that has extra columns with
+\code{\link{as_site_table}}.}
 
 \item{group}{Optional vector of length \code{nrow(x)} assigning each site
 to a group (e.g. habitat or treatment); results are then computed
@@ -50,6 +53,11 @@ species.}
 \item{beta_M_lwr, beta_M_upr}{Confidence interval for \code{beta_M}.
 It is built on the log scale, so it is not symmetric around
 \code{beta_M}.}
+\item{beta_W, beta_W_lwr, beta_W_upr}{Conventional Whittaker beta,
+\code{gamma_hat / alpha} (= \code{beta_M + 1}), and its interval
+(the \code{beta_M} interval + 1). Same information as
+\code{beta_M}; reported for comparison with studies that use
+gamma / alpha.}
 }
 beta_M can't be estimated, and an error is raised (or the group is
 skipped, in a grouped call), when every site has exactly the same
@@ -94,6 +102,7 @@ hypothesis testing for beta diversity. \emph{Ecology}, 85(10), 2895-2900.
 \seealso{
 Other beta diversity functions: 
 \code{\link{as_site_by_species}()},
+\code{\link{as_site_table}()},
 \code{\link{beta_diversity_test}()}
 }
 \concept{beta diversity functions}

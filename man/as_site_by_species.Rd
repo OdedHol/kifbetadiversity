@@ -99,6 +99,7 @@ head(read.csv(path))
 }
 \seealso{
 Other beta diversity functions: 
+\code{\link{as_site_table}()},
 \code{\link{beta_diversity}()},
 \code{\link{beta_diversity_test}()}
 }

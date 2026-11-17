@@ -89,6 +89,7 @@ hypothesis testing for beta diversity. \emph{Ecology}, 85(10), 2895-2900.
 \seealso{
 Other beta diversity functions: 
 \code{\link{as_site_by_species}()},
+\code{\link{as_site_table}()},
 \code{\link{beta_diversity}()}
 }
 \concept{beta diversity functions}
