@@ -78,11 +78,26 @@ delta method into a standard error for $\ln\beta_M$. The interval is built on
 the log scale and transformed back, so it is not symmetric around beta_M
 and never goes below 0.
 
-## From a field CSV to results
+## Which shape is your data?
 
-Field data usually comes as one row per record: where, what, and perhaps a
-count and a habitat. The package ships a small **made-up** survey of 30 open
-and 30 tree sites to practise with:
+Field data usually comes in one of two shapes, and each has its own
+preparation function. Both return the same thing, a list with `x` (a sites x
+species table) and `group` (each site's habitat), so everything after that
+step is identical.
+
+| | Shape 1: one row per record | Shape 2: one row per site |
+|---|---|---|
+| Each row is | one species found at one site | one site |
+| Species are | values in a column (`species`) | columns (`sp01`, `sp02`, ...) |
+| Sites where nothing was found | have no rows: list them with `all_sites` | are rows of zeros: nothing extra needed |
+| Prepare with | `as_site_by_species()` | `as_site_table()` |
+
+The package ships a small **made-up** survey of 30 open and 30 tree sites in
+both shapes, to practise with. The two give identical results.
+
+## Shape 1: one row per record
+
+Each row says where, what, and perhaps a count and a habitat:
 
 ```{r read}
 records <- read.csv(system.file("extdata", "example_survey.csv",
@@ -122,6 +137,48 @@ table(res$group)
 
 `res$x` has 60 sites, including the two empty ones (`open_30` and
 `tree_30`).
+
+## Shape 2: one row per site
+
+Here each row is a site, each species is a column, and there are some extra
+columns, as in many field spreadsheets:
+
+```{r read-wide}
+tab <- read.csv(system.file("extdata", "example_site_table.csv",
+                            package = "kifbetadiversity"))
+tab[1:4, 1:9]
+```
+
+`as_site_table()` needs three things:
+
+- **`site`**: a column that names each row and is **unique per row**.
+  `plot_num` repeats (plot 1 has an open and a tree site), so `site_id` is
+  used.
+- **`species`**: which columns are species. Every column given here counts
+  as a species, so leave out `plot_num` and `richness`. Give column names,
+  positions such as `5:49`, or a range from the first to the last species
+  column, as here.
+- **`group`**: the habitat column.
+
+```{r prepare-wide}
+res <- as_site_table(tab, site = "site_id", group = "habitat",
+                     species = "sp01:sp45")
+dim(res$x)
+```
+
+A site where nothing was found is a row of zeros here, so it is already
+included, and `all_sites` isn't needed.
+
+If you include columns that probably aren't species, the package warns:
+
+```{r wide-warning}
+res_bad <- as_site_table(tab[, -2], site = "site_id")
+```
+
+## Results
+
+Both shapes give the same `res`, so from here on it doesn't matter which one
+you started with.
 
 ### Estimate beta_M per habitat
 
@@ -171,6 +228,7 @@ both, so it is too low.
 | `beta_M` | Whittaker's beta, `gamma_hat / alpha - 1`. |
 | `se_ln_beta_M` | Standard error of `log(beta_M)` (Eq. 7). |
 | `beta_M_lwr`, `beta_M_upr` | Confidence interval for `beta_M` (95% by default; change it with `conf`). |
+| `beta_W`, `beta_W_lwr`, `beta_W_upr` | Conventional Whittaker beta, `gamma_hat / alpha` (= `beta_M + 1`), and its interval (the `beta_M` interval + 1). Same information as `beta_M`, for comparison with studies that use gamma / alpha. |
 
 `beta_diversity_test()` returns the two group labels, both beta_M values,
 `Z_beta_M` and a two-tailed `p_beta_M`.
@@ -207,14 +265,33 @@ computed with `jack1.se` will therefore differ slightly from
 
 ## Common errors
 
-**A wide table read without row names.** If your CSV is already a sites x
-species table with site names in the first column, read it with
-`row.names = 1`, or the site names become a text column:
+**`duplicate 'row.names' are not allowed`.** This comes from `read.csv()`
+when you use `row.names = 1` but the first column repeats, for example a
+tree or plot number shared by two habitats. Read the file normally and use
+`as_site_table()` with a column that is unique per row:
+
+```r
+tab <- read.csv("my_file.csv")
+res <- as_site_table(tab, site = "site_id", group = "habitat",
+                     species = "first_species:last_species")
+```
+
+**A one-row-per-site table passed straight to `beta_diversity()`.** Its text
+columns (site names, habitat) stop it, and the error suggests the
+`as_site_table()` call to use:
 
 ```{r wide-error, error = TRUE}
-csv <- "site,sp1,sp2,sp3\ns1,1,0,1\ns2,0,1,1\ns3,1,1,0"
+csv <- "site,habitat,sp1,sp2,sp3\ns1,open,1,0,1\ns2,open,0,1,1\ns3,tree,1,1,0"
 beta_diversity(read.csv(text = csv))
 ```
+
+**"These columns are being treated as species, but may not be species".**
+A column you gave as a species looks like an ID, a date or a richness or
+abundance total. Every column counts as a species, so leave it out with
+`species = `. If it really is a species, you can ignore the warning.
+
+**The wrong function for the shape.** `as_site_by_species()` on a
+one-row-per-site table says so and points to `as_site_table()`.
 
 **Records with no species name.** The package can't guess which species a
 record is, so it stops and gives the row numbers to fix or remove:
